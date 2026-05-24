@@ -3,7 +3,7 @@
  * Plugin Name: WPFixPath Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor/
  * Description: A small free WordPress plugin for finding broken, redirected, or suspicious internal links inside post, page, and product content.
- * Version: 0.1.0
+ * Version: 0.1.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -25,7 +25,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
 	final class WPFixPath_Redirect_Internal_Link_Auditor {
-		private const VERSION      = '0.1.0';
+		private const VERSION      = '0.1.1';
 		private const SLUG         = 'wpfixpath-redirect-internal-link-auditor';
 		private const CAPABILITY   = 'manage_options';
 		private const NONCE_ACTION = 'wpfixpath_rila_run_scan';

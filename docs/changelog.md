@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1
+
+- Updated public screenshots from the current WordPress admin UI.
+
 ## 0.1.0
 
 - Added admin-only Tools screen.
