@@ -1,0 +1,5 @@
+Source Post/Page,Source Type,Source URL,Linked URL,HTTP Status,Redirect Count,Final URL,Warning,Anchor Text,Result
+"Practice Areas","Page","https://example.com/practice-areas/","https://example.com/old-service/","301 -> 200",1,"https://example.com/services/","Redirect (301)","service page","Warning"
+"About","Page","https://example.com/about/","https://example.com/missing-page/","404",0,"https://example.com/missing-page/","Broken link (404)","team profile","Error"
+"Contact","Page","https://example.com/contact/","https://staging.example.com/form/","",,"","Staging/dev domain; Status check skipped by same-site scope","contact form","Needs review"
+"Blog Migration Notes","Post","https://example.com/blog/migration-notes/","https://old-example.com/location/","",,"","Old domain; Status check skipped by same-site scope","old location page","Needs review"

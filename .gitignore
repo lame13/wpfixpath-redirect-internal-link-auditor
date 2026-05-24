@@ -1,0 +1,32 @@
+# OS metadata.
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+
+# IDE and editor metadata.
+.idea/
+.vscode/
+*.iml
+*.swp
+*.swo
+*~
+
+# Local logs.
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Dependencies and generated output.
+node_modules/
+vendor/
+dist/
+build/
+coverage/
+
+# Local environment files.
+.env
+.env.*
+!.env.example
