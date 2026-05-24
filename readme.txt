@@ -3,11 +3,11 @@ Contributors: wpfixpath, indexlane
 Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 0.1.1
+Stable tag: 0.1.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-A small free WordPress plugin for finding broken, redirected, or suspicious internal links inside post, page, and product content.
+Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
 
 == Description ==
 
@@ -31,9 +31,7 @@ HTTP requests are made only to the current site. Links to old, staging, or devel
 
 == Data handling ==
 
-This tool scans selected WordPress content and checks same-site link targets on demand. Results are generated for the current run and can be exported as CSV.
-
-No telemetry. No premium tier. No scan data is sent to WPFixPath, IndexLane, or any third party.
+Scans run on demand from WordPress admin. The plugin does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
 
 == Limits ==
 
@@ -71,6 +69,10 @@ No in v0.1. Old, staging, and development-domain links are flagged but not fetch
 2. Results table with source page, linked URL, status evidence, warnings, and CSV export.
 
 == Changelog ==
+
+= 0.1.2 =
+
+* Rewrote README, readme, and plugin metadata copy in a less defensive voice.
 
 = 0.1.1 =
 

@@ -1,42 +1,37 @@
 # WPFixPath Redirect & Internal Link Auditor
 
-A small free WordPress plugin for finding broken, redirected, or suspicious internal links inside post, page, and product content.
+Find broken, redirected, old-domain, and staging-domain links inside WordPress post, page, and product content.
 
-## What it does
+The plugin runs in wp-admin and builds a cleanup table: source page, linked URL, HTTP status, redirect count, final URL, warning, anchor text, and result label.
 
-Find internal content links that return 404/410, redirect through 301/302, or still point to old/staging domains.
+Useful after migrations, redesigns, domain changes, or old cleanup work where internal links quietly drift.
 
-The plugin adds an admin-only screen at:
+## What it checks
 
-```text
-Tools -> Redirect & Internal Link Auditor
-```
-
-From there, a site administrator can:
-
-- scan published posts, pages, and WooCommerce products when available
-- extract internal links from post content
-- check same-site HTTP status codes
-- flag 404/410 responses
-- flag 301/302 redirects and redirect chains
-- flag links to old domains supplied by the administrator
-- flag common staging and development-domain links
-- view source post/page evidence
-- export a CSV report
+- internal links found in post, page, and WooCommerce product content
+- 404 and 410 targets
+- 301 / 302 redirects
+- redirect chains
+- links pointing to old domains you enter
+- common staging or development-domain links
+- source page and anchor text
+- CSV export for cleanup
 
 ## Data handling
 
-This tool scans selected WordPress content and checks same-site link targets on demand. Results are generated for the current run and can be exported as CSV.
+Scans run on demand from your WordPress admin.
 
-No telemetry. No premium tier. No scan data is sent to WPFixPath, IndexLane, or any third party.
+The plugin checks selected WordPress content and same-site link targets, then shows the results in the current admin screen. You can export the results as CSV.
+
+It does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
 
 ## Limits
 
-This is a quick diagnostic helper, not a replacement for Google Search Console, Screaming Frog, Sitebulb, server logs, or a full technical SEO audit.
-
-Version 0.1 is read-only. It does not auto-fix links, bulk edit content, schedule scans, create database tables, add frontend badges, or display upgrade prompts.
+This is a content-link checker, not a crawler.
 
 Version 0.1 scans links found in WordPress post, page, and product content. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
+
+It is read-only. It does not replace links, bulk edit content, schedule scans, create database tables, or add frontend badges.
 
 ## CSV columns
 
@@ -59,22 +54,7 @@ Version 0.1 scans links found in WordPress post, page, and product content. It d
 - Error
 - Needs review
 
-Labels are conservative. The plugin reports evidence; it does not claim ranking impact.
-
-## Repository contents
-
-```text
-wpfixpath-redirect-internal-link-auditor.php
-readme.txt
-README.md
-assets/
-  screenshot-1.png
-  screenshot-2.png
-  demo.gif
-docs/
-  sample-report.csv
-  changelog.md
-```
+Labels are intentionally conservative. The plugin reports link evidence; it does not guess SEO impact.
 
 ## Development
 
@@ -84,4 +64,14 @@ Run a syntax check before packaging:
 php -l wpfixpath-redirect-internal-link-auditor.php
 ```
 
-For a manual WordPress check, copy or symlink this folder into `wp-content/plugins/`, activate the plugin, then open `Tools -> Redirect & Internal Link Auditor`.
+For a manual WordPress check, copy or symlink this folder into:
+
+```text
+wp-content/plugins/
+```
+
+Then activate the plugin and open:
+
+```text
+Tools -> Redirect & Internal Link Auditor
+```

@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.2
+
+- Rewrote README, readme, and plugin metadata copy in a less defensive voice.
+
 ## 0.1.1
 
 - Updated public screenshots from the current WordPress admin UI.
