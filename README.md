@@ -19,11 +19,11 @@ Useful after migrations, redesigns, domain changes, or old cleanup work where in
 
 ## Data handling
 
-Scans run on demand from your WordPress admin.
+Checks run on demand inside wp-admin. Results are shown for the current run and can be exported as CSV without repeating the scan.
 
-The plugin checks selected WordPress content and same-site link targets, then shows the results in the current admin screen. You can export the results as CSV.
+Completed results are cached in a per-user WordPress transient for up to one hour so the export contains the exact evidence shown on screen. The plugin does not create custom database tables.
 
-It does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
+The plugin does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
 
 ## Limits
 
@@ -32,6 +32,8 @@ This is a content-link checker, not a crawler.
 Version 0.1 scans links found in WordPress post, page, and product content. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
 
 It is read-only. It does not replace links, bulk edit content, schedule scans, create database tables, or add frontend badges.
+
+Each run makes at most 250 outbound HTTP requests. Redirect hops each consume one request, and links that cannot be completed inside that budget are explicitly marked for review.
 
 ## CSV columns
 

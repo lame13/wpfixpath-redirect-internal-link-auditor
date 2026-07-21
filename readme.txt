@@ -3,7 +3,7 @@ Contributors: wpfixpath, indexlane
 Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 0.1.2
+Stable tag: 0.1.3
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -31,7 +31,9 @@ HTTP requests are made only to the current site. Links to old, staging, or devel
 
 == Data handling ==
 
-Scans run on demand from WordPress admin. The plugin does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
+Scans run on demand from WordPress admin. Completed results are stored in a per-user WordPress transient for up to one hour so CSV export can reuse the displayed evidence without scanning again.
+
+The plugin does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
 
 == Limits ==
 
@@ -53,7 +55,7 @@ No. Version 0.1 is read-only and diagnostic only.
 
 = Does this plugin store scan results? =
 
-No. Version 0.1 does not create custom database tables or store scan results.
+Only temporarily. The latest completed result set is cached for up to one hour for per-user CSV export. The plugin does not create custom database tables.
 
 = Does it use an external API? =
 
@@ -69,6 +71,13 @@ No in v0.1. Old, staging, and development-domain links are flagged but not fetch
 2. Results table with source page, linked URL, status evidence, warnings, and CSV export.
 
 == Changelog ==
+
+= 0.1.3 =
+
+* Kept trailing-slash URL variants distinct in request caching and redirect-loop detection.
+* Made the 250-request limit count every actual outbound HTTP request, including redirect hops.
+* Replaced HEAD-derived status claims with bounded GET verification through the safe WordPress HTTP API.
+* Exported the exact completed scan from short-lived per-user storage instead of rescanning content and URLs.
 
 = 0.1.2 =
 

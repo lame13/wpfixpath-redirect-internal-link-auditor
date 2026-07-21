@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.1.3
+
+- Kept trailing-slash URL variants distinct in request caching and redirect-loop detection.
+- Made the 250-request limit count every actual outbound HTTP request, including redirect hops.
+- Replaced HEAD-derived status claims with bounded GET verification through the safe WordPress HTTP API.
+- Exported the exact completed scan from short-lived per-user storage instead of rescanning content and URLs.
+
 ## 0.1.2
 
 - Rewrote README, readme, and plugin metadata copy in a less defensive voice.

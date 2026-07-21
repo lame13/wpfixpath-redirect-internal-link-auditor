@@ -3,7 +3,7 @@
  * Plugin Name: WPFixPath Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor/
  * Description: Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
- * Version: 0.1.2
+ * Version: 0.1.3
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -25,12 +25,15 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
 	final class WPFixPath_Redirect_Internal_Link_Auditor {
-		private const VERSION      = '0.1.2';
-		private const SLUG         = 'wpfixpath-redirect-internal-link-auditor';
-		private const CAPABILITY   = 'manage_options';
-		private const NONCE_ACTION = 'wpfixpath_rila_run_scan';
-		private const NONCE_NAME   = 'wpfixpath_rila_nonce';
-		private const MAX_LINK_REQUESTS = 250;
+		private const VERSION                  = '0.1.3';
+		private const SLUG                     = 'wpfixpath-redirect-internal-link-auditor';
+		private const CAPABILITY               = 'manage_options';
+		private const NONCE_ACTION             = 'wpfixpath_rila_run_scan';
+		private const NONCE_NAME               = 'wpfixpath_rila_nonce';
+		private const MAX_HTTP_REQUESTS         = 250;
+		private const RESPONSE_SIZE_LIMIT       = 4096;
+		private const EXPORT_TRANSIENT_PREFIX   = 'wpfixpath_rila_export_';
+		private const EXPORT_TRANSIENT_LIFETIME = 3600;
 
 		/**
 		 * Boot the plugin.
@@ -89,10 +92,16 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 
 			check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
 
-			$settings = self::get_request_settings();
-			$scan     = self::run_scan( $settings );
+			$export_token = isset( $_POST['export_token'] ) && is_scalar( $_POST['export_token'] )
+				? sanitize_text_field( wp_unslash( (string) $_POST['export_token'] ) )
+				: '';
+			$results      = self::get_export_results( $export_token );
 
-			self::send_csv( $scan['results'] );
+			if ( null === $results ) {
+				wp_die( esc_html__( 'The saved scan is unavailable or has expired. Run the checks again before exporting.', 'wpfixpath-redirect-internal-link-auditor' ) );
+			}
+
+			self::send_csv( $results );
 		}
 
 		/**
@@ -112,6 +121,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
 					$settings = self::get_request_settings();
 					$scan     = self::run_scan( $settings );
+					$scan['export_token'] = self::store_export_results( $scan['results'] );
 				}
 			}
 
@@ -216,9 +226,6 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						<button type="submit" name="wpfixpath_rila_action" value="run" class="button button-primary">
 							<?php esc_html_e( 'Run checks', 'wpfixpath-redirect-internal-link-auditor' ); ?>
 						</button>
-						<button type="submit" name="wpfixpath_rila_action" value="export" class="button">
-							<?php esc_html_e( 'Export CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
-						</button>
 					</p>
 				</form>
 
@@ -230,7 +237,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 
 				<?php
 				if ( is_array( $scan ) ) {
-					self::render_results( $scan, $settings );
+					self::render_results( $scan );
 				}
 				?>
 			</div>
@@ -270,10 +277,9 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		/**
 		 * Render scan results.
 		 *
-		 * @param array<string,mixed> $scan     Scan data.
-		 * @param array<string,mixed> $settings Sanitized settings.
+		 * @param array<string,mixed> $scan Scan data.
 		 */
-		private static function render_results( array $scan, array $settings ): void {
+		private static function render_results( array $scan ): void {
 			$stats   = $scan['stats'];
 			$results = $scan['results'];
 			?>
@@ -284,28 +290,58 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					<?php
 					echo esc_html(
 						sprintf(
-							/* translators: 1: source count, 2: link count, 3: audited count, 4: skipped count */
-							__( 'Scanned %1$d content items, found %2$d links, audited %3$d relevant links, and skipped %4$d unrelated external links.', 'wpfixpath-redirect-internal-link-auditor' ),
+							/* translators: 1: source count, 2: link count, 3: audited count, 4: skipped count, 5: HTTP request count, 6: HTTP request limit */
+							__( 'Scanned %1$d content items, found %2$d links, audited %3$d relevant links, skipped %4$d unrelated external links, and made %5$d of at most %6$d outbound HTTP requests.', 'wpfixpath-redirect-internal-link-auditor' ),
 							(int) $stats['sources_scanned'],
 							(int) $stats['links_found'],
 							(int) $stats['links_audited'],
-							(int) $stats['skipped_external']
+							(int) $stats['skipped_external'],
+							(int) $stats['http_requests'],
+							self::MAX_HTTP_REQUESTS
 						)
 					);
 					?>
 				</p>
 
-				<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>">
-					<?php
-					wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME );
-					self::render_hidden_settings_fields( $settings );
-					?>
-					<p>
-						<button type="submit" name="wpfixpath_rila_action" value="export" class="button">
-							<?php esc_html_e( 'Export CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
-						</button>
+				<?php if ( ! empty( $stats['checks_skipped_budget'] ) ) : ?>
+					<div class="notice notice-warning inline">
+						<p>
+							<?php
+							echo esc_html(
+								sprintf(
+									/* translators: %d: number of link occurrences not completely checked */
+									_n(
+										'%d link occurrence could not be completely checked because the outbound-request budget was exhausted.',
+										'%d link occurrences could not be completely checked because the outbound-request budget was exhausted.',
+										(int) $stats['checks_skipped_budget'],
+										'wpfixpath-redirect-internal-link-auditor'
+									),
+									(int) $stats['checks_skipped_budget']
+								)
+							);
+							?>
+						</p>
+					</div>
+				<?php endif; ?>
+
+				<?php if ( ! empty( $scan['export_token'] ) ) : ?>
+					<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>">
+						<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+						<input type="hidden" name="export_token" value="<?php echo esc_attr( $scan['export_token'] ); ?>" />
+						<p>
+							<button type="submit" name="wpfixpath_rila_action" value="export" class="button">
+								<?php esc_html_e( 'Export these results as CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+							</button>
+							<span class="description">
+								<?php esc_html_e( 'Uses this saved scan without making more HTTP requests. Saved scan data expires after one hour.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+							</span>
+						</p>
+					</form>
+				<?php else : ?>
+					<p class="description">
+						<?php esc_html_e( 'These results could not be saved temporarily, so CSV export is unavailable for this scan.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
 					</p>
-				</form>
+				<?php endif; ?>
 
 				<?php if ( empty( $results ) ) : ?>
 					<p><?php esc_html_e( 'No internal, old-domain, or staging/development-domain content links were found in the scanned content.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
@@ -355,26 +391,6 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				<?php endif; ?>
 			</div>
 			<?php
-		}
-
-		/**
-		 * Render hidden fields for the export form.
-		 *
-		 * @param array<string,mixed> $settings Sanitized settings.
-		 */
-		private static function render_hidden_settings_fields( array $settings ): void {
-			foreach ( $settings['post_types'] as $post_type ) {
-				printf(
-					'<input type="hidden" name="post_types[]" value="%s" />' . "\n",
-					esc_attr( $post_type )
-				);
-			}
-
-			printf( '<input type="hidden" name="old_domains" value="%s" />' . "\n", esc_attr( $settings['old_domains'] ) );
-			printf( '<input type="hidden" name="max_posts" value="%s" />' . "\n", esc_attr( (string) $settings['max_posts'] ) );
-			printf( '<input type="hidden" name="timeout" value="%s" />' . "\n", esc_attr( (string) $settings['timeout'] ) );
-			printf( '<input type="hidden" name="max_redirects" value="%s" />' . "\n", esc_attr( (string) $settings['max_redirects'] ) );
-
 		}
 
 		/**
@@ -475,10 +491,12 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		private static function run_scan( array $settings ): array {
 			$results = array();
 			$stats   = array(
-				'sources_scanned'  => 0,
-				'links_found'      => 0,
-				'links_audited'    => 0,
-				'skipped_external' => 0,
+				'sources_scanned'       => 0,
+				'links_found'           => 0,
+				'links_audited'         => 0,
+				'skipped_external'      => 0,
+				'http_requests'         => 0,
+				'checks_skipped_budget' => 0,
 			);
 
 			if ( empty( $settings['post_types'] ) ) {
@@ -491,6 +509,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			$current_host  = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
 			$checked_urls  = array();
 			$request_count = 0;
+			$budget_skips  = 0;
 
 			$query = new WP_Query(
 				array(
@@ -524,7 +543,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				$stats['links_found'] += count( $links );
 
 				foreach ( $links as $link ) {
-					$row = self::audit_link( $link, $source, $settings, $current_host, $checked_urls, $request_count );
+					$row = self::audit_link( $link, $source, $settings, $current_host, $checked_urls, $request_count, $budget_skips );
 
 					if ( 'skip' === $row ) {
 						$stats['skipped_external']++;
@@ -537,6 +556,8 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			}
 
 			wp_reset_postdata();
+			$stats['http_requests']         = $request_count;
+			$stats['checks_skipped_budget'] = $budget_skips;
 
 			return array(
 				'results' => $results,
@@ -633,9 +654,10 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 * @param string                           $current_host Normalized current site host.
 		 * @param array<string,array<string,mixed>> $checked_urls Per-run URL request cache.
 		 * @param int                              $request_count Per-run HTTP request count.
+		 * @param int                              $budget_skips  Link occurrences not completely checked due to the request budget.
 		 * @return array<string,mixed>|string
 		 */
-		private static function audit_link( array $link, array $source, array $settings, string $current_host, array &$checked_urls, int &$request_count ) {
+		private static function audit_link( array $link, array $source, array $settings, string $current_host, array &$checked_urls, int &$request_count, int &$budget_skips ) {
 			$linked_url = self::normalize_link_url( $link['href'], (string) $source['url'] );
 
 			if ( '' === $linked_url ) {
@@ -704,11 +726,12 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 
 			if ( isset( $checked_urls[ $cache_key ] ) ) {
 				$check = $checked_urls[ $cache_key ];
-			} elseif ( $request_count >= self::MAX_LINK_REQUESTS ) {
+			} elseif ( $request_count >= self::MAX_HTTP_REQUESTS ) {
+				$budget_skips++;
 				$warnings[] = sprintf(
-					/* translators: %d: maximum number of same-site HTTP requests per run */
-					__( 'Status check skipped after the %d-request cap was reached', 'wpfixpath-redirect-internal-link-auditor' ),
-					self::MAX_LINK_REQUESTS
+					/* translators: %d: maximum number of outbound HTTP requests per run */
+					__( 'Status check skipped after the %d-request budget was exhausted', 'wpfixpath-redirect-internal-link-auditor' ),
+					self::MAX_HTTP_REQUESTS
 				);
 
 				return self::build_result_row(
@@ -722,9 +745,26 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'Needs review'
 				);
 			} else {
-				$request_count++;
-				$check = self::check_url( $linked_url, (float) $settings['timeout'], (int) $settings['max_redirects'] );
+				$check = self::check_url( $linked_url, (float) $settings['timeout'], (int) $settings['max_redirects'], $request_count );
 				$checked_urls[ $cache_key ] = $check;
+			}
+
+			if ( ! empty( $check['budget_exhausted'] ) ) {
+				$budget_skips++;
+				if ( ! empty( $check['error'] ) ) {
+					$warnings[] = $check['error'];
+				}
+
+				return self::build_result_row(
+					$source,
+					$link,
+					$linked_url,
+					implode( ' -> ', $check['statuses'] ),
+					$check['redirect_count'],
+					$check['final_url'],
+					self::format_warning_text( $warnings ),
+					'Needs review'
+				);
 			}
 
 			if ( ! $check['ok'] ) {
@@ -816,9 +856,10 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 * @param string $url           URL to check.
 		 * @param float  $timeout       Request timeout.
 		 * @param int    $max_redirects Max redirects.
+		 * @param int    $request_count Per-run outbound HTTP request count.
 		 * @return array<string,mixed>
 		 */
-		private static function check_url( string $url, float $timeout, int $max_redirects ): array {
+		private static function check_url( string $url, float $timeout, int $max_redirects, int &$request_count ): array {
 			$current_url            = $url;
 			$statuses               = array();
 			$redirect_codes         = array();
@@ -830,13 +871,35 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			$current_host           = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
 
 			while ( true ) {
-				if ( isset( $visited[ $current_url ] ) ) {
+				$visited_key = self::normalize_url_for_compare( $current_url );
+				if ( isset( $visited[ $visited_key ] ) ) {
 					$redirect_loop = true;
 					break;
 				}
 
-				$visited[ $current_url ] = true;
+				$visited[ $visited_key ] = true;
 
+				if ( $request_count >= self::MAX_HTTP_REQUESTS ) {
+					return array(
+						'ok'                     => false,
+						'error'                  => sprintf(
+							/* translators: %d: maximum number of outbound HTTP requests per run */
+							__( 'Status check incomplete because the %d-request budget was exhausted', 'wpfixpath-redirect-internal-link-auditor' ),
+							self::MAX_HTTP_REQUESTS
+						),
+						'statuses'               => $statuses,
+						'redirect_count'         => $redirect_count,
+						'redirect_codes'         => $redirect_codes,
+						'final_status'           => count( $statuses ) ? (int) end( $statuses ) : 0,
+						'final_url'              => $current_url,
+						'redirect_limit_reached' => false,
+						'redirect_loop'          => false,
+						'redirect_left_site'     => false,
+						'budget_exhausted'       => true,
+					);
+				}
+
+				$request_count++;
 				$response = self::request_url_without_redirects( $current_url, $timeout );
 
 				if ( is_wp_error( $response ) ) {
@@ -851,6 +914,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						'redirect_limit_reached' => $redirect_limit_reached,
 						'redirect_loop'          => $redirect_loop,
 						'redirect_left_site'     => $redirect_left_site,
+						'budget_exhausted'       => false,
 					);
 				}
 
@@ -869,6 +933,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						'redirect_limit_reached' => $redirect_limit_reached,
 						'redirect_loop'          => $redirect_loop,
 						'redirect_left_site'     => $redirect_left_site,
+						'budget_exhausted'       => false,
 					);
 				}
 
@@ -890,6 +955,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						'redirect_limit_reached' => $redirect_limit_reached,
 						'redirect_loop'          => $redirect_loop,
 						'redirect_left_site'     => $redirect_left_site,
+						'budget_exhausted'       => false,
 					);
 				}
 
@@ -915,6 +981,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						'redirect_limit_reached' => $redirect_limit_reached,
 						'redirect_loop'          => $redirect_loop,
 						'redirect_left_site'     => $redirect_left_site,
+						'budget_exhausted'       => false,
 					);
 				}
 
@@ -932,6 +999,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						'redirect_limit_reached' => false,
 						'redirect_loop'          => false,
 						'redirect_left_site'     => true,
+						'budget_exhausted'       => false,
 					);
 				}
 
@@ -949,6 +1017,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				'redirect_limit_reached' => $redirect_limit_reached,
 				'redirect_loop'          => $redirect_loop,
 				'redirect_left_site'     => $redirect_left_site,
+				'budget_exhausted'       => false,
 			);
 		}
 
@@ -961,25 +1030,14 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 */
 		private static function request_url_without_redirects( string $url, float $timeout ) {
 			$args = array(
-				'timeout'     => $timeout,
-				'redirection' => 0,
-				'user-agent'  => 'WPFixPath Redirect & Internal Link Auditor/' . self::VERSION . '; ' . home_url( '/' ),
+				'timeout'             => $timeout,
+				'redirection'         => 0,
+				'reject_unsafe_urls'  => true,
+				'limit_response_size' => self::RESPONSE_SIZE_LIMIT,
+				'user-agent'          => 'WPFixPath Redirect & Internal Link Auditor/' . self::VERSION . '; ' . home_url( '/' ),
 			);
 
-			$response = wp_remote_head( $url, $args );
-			if ( is_wp_error( $response ) ) {
-				return $response;
-			}
-
-			$status = (int) wp_remote_retrieve_response_code( $response );
-			if ( ! in_array( $status, array( 0, 403, 405, 501 ), true ) ) {
-				return $response;
-			}
-
-			$args['method']              = 'GET';
-			$args['limit_response_size'] = 4096;
-
-			return wp_remote_request( $url, $args );
+			return wp_safe_remote_get( $url, $args );
 		}
 
 		/**
@@ -1113,6 +1171,55 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
+		 * Save one completed scan briefly so export does not repeat the scan.
+		 *
+		 * @param array<int,array<string,mixed>> $results Result rows.
+		 */
+		private static function store_export_results( array $results ): string {
+			$token = wp_generate_uuid4();
+			$saved = set_transient(
+				self::export_transient_key( $token ),
+				array( 'results' => $results ),
+				self::EXPORT_TRANSIENT_LIFETIME
+			);
+
+			return $saved ? $token : '';
+		}
+
+		/**
+		 * Load results for the current administrator and scan token.
+		 *
+		 * @return array<int,array<string,mixed>>|null
+		 */
+		private static function get_export_results( string $token ): ?array {
+			if ( ! self::is_valid_export_token( $token ) ) {
+				return null;
+			}
+
+			$saved = get_transient( self::export_transient_key( $token ) );
+
+			if ( ! is_array( $saved ) || ! isset( $saved['results'] ) || ! is_array( $saved['results'] ) ) {
+				return null;
+			}
+
+			return $saved['results'];
+		}
+
+		/**
+		 * Build a transient key scoped to the current user.
+		 */
+		private static function export_transient_key( string $token ): string {
+			return self::EXPORT_TRANSIENT_PREFIX . get_current_user_id() . '_' . str_replace( '-', '', strtolower( $token ) );
+		}
+
+		/**
+		 * Validate an export token before using it in a transient key.
+		 */
+		private static function is_valid_export_token( string $token ): bool {
+			return 1 === preg_match( '/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i', $token );
+		}
+
+		/**
 		 * Avoid spreadsheet formula execution on CSV open.
 		 */
 		private static function csv_safe( string $value ): string {
@@ -1157,7 +1264,9 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
-		 * Normalize a URL for per-run request cache keys.
+		 * Normalize a URL for per-run request cache and redirect-loop keys.
+		 *
+		 * Paths remain byte-for-byte distinct, including a trailing slash.
 		 */
 		private static function normalize_url_for_compare( string $url ): string {
 			$url   = preg_replace( '/#.*/', '', $url );
@@ -1165,18 +1274,14 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			$parts = wp_parse_url( $url );
 
 			if ( ! is_array( $parts ) || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
-				return strtolower( untrailingslashit( $url ) );
+				return $url;
 			}
 
 			$scheme = strtolower( (string) $parts['scheme'] );
-			$host   = self::normalize_host( (string) $parts['host'] );
+			$host   = strtolower( trim( (string) $parts['host'], " \t\n\r\0\x0B." ) );
 			$port   = empty( $parts['port'] ) ? '' : ':' . (int) $parts['port'];
-			$path   = isset( $parts['path'] ) ? untrailingslashit( (string) $parts['path'] ) : '/';
+			$path   = isset( $parts['path'] ) && '' !== $parts['path'] ? (string) $parts['path'] : '/';
 			$query  = isset( $parts['query'] ) ? '?' . (string) $parts['query'] : '';
-
-			if ( '' === $path ) {
-				$path = '/';
-			}
 
 			return $scheme . '://' . $host . $port . $path . $query;
 		}
@@ -1255,6 +1360,8 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				$query               = '?' . $query;
 			}
 
+			$has_trailing_slash = strlen( $path ) > 1 && '/' === substr( $path, -1 );
+
 			$segments = explode( '/', $path );
 			$output   = array();
 
@@ -1271,7 +1378,12 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				$output[] = $segment;
 			}
 
-			return '/' . implode( '/', $output ) . $query;
+			$normalized = '/' . implode( '/', $output );
+			if ( $has_trailing_slash && '/' !== $normalized ) {
+				$normalized .= '/';
+			}
+
+			return $normalized . $query;
 		}
 
 		/**
