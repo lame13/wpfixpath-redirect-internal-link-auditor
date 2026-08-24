@@ -1,0 +1,4 @@
+Destination,Impact,Occurrences,"Affected Content Items",Result,"HTTP Status Evidence","Maximum Observed Redirects","Observed Final URLs","Warning Evidence"
+"https://example.com/missing-page/","Broken/error",3,2,"Error","404",0,"https://example.com/missing-page/","Broken link (404)"
+"https://example.com/old-service/","Redirect",4,3,"Warning","301 -> 200",1,"https://example.com/services/","Redirect (301)"
+"https://example.com/legacy-chain/","Redirect",2,2,"Warning","301 -> 302 -> 200",2,"https://example.com/current/","Redirect chain"

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.2.0
+
+- Added a destination-centric impact view for broken/error and redirected targets.
+- Grouped normalized destinations by total link occurrences and distinct affected content items.
+- Preserved HTTP status, redirect-count, effective-final-URL, warning, and result evidence.
+- Added deterministic severity, affected-source, occurrence, and URL ordering.
+- Added a separate destination-impact CSV while preserving the detailed occurrence export.
+- Derived both the admin summary and its export from the exact saved scan without additional HTTP requests.
+- Strengthened CSV formula-injection protection for values with leading whitespace or line breaks.
+
 ## 0.1.3
 
 - Kept trailing-slash URL variants distinct in request caching and redirect-loop detection.

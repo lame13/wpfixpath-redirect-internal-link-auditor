@@ -3,7 +3,7 @@
  * Plugin Name: WPFixPath Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor/
  * Description: Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
- * Version: 0.1.3
+ * Version: 0.2.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -25,7 +25,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
 	final class WPFixPath_Redirect_Internal_Link_Auditor {
-		private const VERSION                  = '0.1.3';
+		private const VERSION                  = '0.2.0';
 		private const SLUG                     = 'wpfixpath-redirect-internal-link-auditor';
 		private const CAPABILITY               = 'manage_options';
 		private const NONCE_ACTION             = 'wpfixpath_rila_run_scan';
@@ -86,7 +86,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			}
 
 			$action = isset( $_POST['wpfixpath_rila_action'] ) ? sanitize_key( wp_unslash( $_POST['wpfixpath_rila_action'] ) ) : '';
-			if ( 'export' !== $action ) {
+			if ( ! in_array( $action, array( 'export', 'export_details', 'export_impact' ), true ) ) {
 				return;
 			}
 
@@ -101,7 +101,8 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				wp_die( esc_html__( 'The saved scan is unavailable or has expired. Run the checks again before exporting.', 'wpfixpath-redirect-internal-link-auditor' ) );
 			}
 
-			self::send_csv( $results );
+			$report_type = 'export_impact' === $action ? 'impact' : 'details';
+			self::send_csv( $results, $report_type );
 		}
 
 		/**
@@ -216,7 +217,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 							<tr>
 								<th scope="row"><?php esc_html_e( 'Status checks', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
 								<td>
-									<p><?php esc_html_e( 'Same-site link targets are checked. Old, staging, or development-domain links are flagged but not fetched in v0.1.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
+									<p><?php esc_html_e( 'Same-site link targets are checked. Old, staging, or development-domain links are flagged but not fetched.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
 								</td>
 							</tr>
 						</tbody>
@@ -263,6 +264,23 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 
 				.wpfixpath-rila-results table {
 					table-layout: fixed;
+				}
+
+				.wpfixpath-rila-results .wpfixpath-rila-impact-table {
+					table-layout: auto;
+				}
+
+				.wpfixpath-rila-table-scroll {
+					overflow-x: auto;
+					-webkit-overflow-scrolling: touch;
+				}
+
+				.wpfixpath-rila-table-scroll .wpfixpath-rila-impact-table {
+					min-width: 1180px;
+				}
+
+				.wpfixpath-rila-table-scroll .wpfixpath-rila-occurrence-table {
+					min-width: 1380px;
 				}
 
 				.wpfixpath-rila-results td,
@@ -329,8 +347,11 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 						<input type="hidden" name="export_token" value="<?php echo esc_attr( $scan['export_token'] ); ?>" />
 						<p>
-							<button type="submit" name="wpfixpath_rila_action" value="export" class="button">
-								<?php esc_html_e( 'Export these results as CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+							<button type="submit" name="wpfixpath_rila_action" value="export_details" class="button">
+								<?php esc_html_e( 'Export detailed rows as CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+							</button>
+							<button type="submit" name="wpfixpath_rila_action" value="export_impact" class="button">
+								<?php esc_html_e( 'Export destination impact as CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
 							</button>
 							<span class="description">
 								<?php esc_html_e( 'Uses this saved scan without making more HTTP requests. Saved scan data expires after one hour.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
@@ -346,7 +367,14 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				<?php if ( empty( $results ) ) : ?>
 					<p><?php esc_html_e( 'No internal, old-domain, or staging/development-domain content links were found in the scanned content.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
 				<?php else : ?>
-					<table class="widefat striped">
+					<?php self::render_destination_impact( self::build_destination_impact( $results ) ); ?>
+
+					<h2><?php esc_html_e( 'Link occurrences', 'wpfixpath-redirect-internal-link-auditor' ); ?></h2>
+					<p class="description">
+						<?php esc_html_e( 'Every audited link occurrence remains available below for source-by-source cleanup.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+					</p>
+					<div class="wpfixpath-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Link occurrences', 'wpfixpath-redirect-internal-link-auditor' ); ?>" tabindex="0">
+					<table class="widefat striped wpfixpath-rila-occurrence-table">
 						<thead>
 							<tr>
 								<th><?php esc_html_e( 'Source Post/Page', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
@@ -388,7 +416,66 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 							<?php endforeach; ?>
 						</tbody>
 					</table>
+					</div>
 				<?php endif; ?>
+			</div>
+			<?php
+		}
+
+		/**
+		 * Render one row per actionable destination before the occurrence detail.
+		 *
+		 * @param array<int,array<string,mixed>> $impact_rows Destination impact rows.
+		 */
+		private static function render_destination_impact( array $impact_rows ): void {
+			?>
+			<h2><?php esc_html_e( 'Destination impact', 'wpfixpath-redirect-internal-link-auditor' ); ?></h2>
+			<p class="description">
+				<?php esc_html_e( 'Broken/error and redirected targets are grouped by normalized destination. Repeated links in one content item increase occurrences but count as one affected content item.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+			</p>
+
+			<?php if ( empty( $impact_rows ) ) : ?>
+				<p><?php esc_html_e( 'No broken/error or redirected destinations were found.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
+				<?php return; ?>
+			<?php endif; ?>
+
+			<div class="wpfixpath-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Destination impact', 'wpfixpath-redirect-internal-link-auditor' ); ?>" tabindex="0">
+			<table class="widefat striped wpfixpath-rila-impact-table">
+				<thead>
+					<tr>
+						<th><?php esc_html_e( 'Destination', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Impact', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Occurrences', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Affected Content Items', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Result', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'HTTP Status Evidence', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Maximum Observed Redirects', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Observed Final URLs', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Warning Evidence', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+					</tr>
+				</thead>
+				<tbody>
+					<?php foreach ( $impact_rows as $row ) : ?>
+						<tr>
+							<td>
+								<?php if ( '' !== esc_url( $row['destination_url'] ) ) : ?>
+									<a href="<?php echo esc_url( $row['destination_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['destination_url'] ); ?></a>
+								<?php else : ?>
+									<?php echo esc_html( $row['destination_url'] ); ?>
+								<?php endif; ?>
+							</td>
+							<td><?php echo esc_html( $row['impact'] ); ?></td>
+							<td><?php echo esc_html( (string) $row['occurrences'] ); ?></td>
+							<td><?php echo esc_html( (string) $row['affected_sources'] ); ?></td>
+							<td><?php echo esc_html( $row['result'] ); ?></td>
+							<td><?php echo esc_html( $row['http_status_evidence'] ); ?></td>
+							<td><?php echo esc_html( (string) $row['max_redirect_count'] ); ?></td>
+							<td><?php echo esc_html( $row['effective_final_url'] ); ?></td>
+							<td><?php echo esc_html( $row['warning_evidence'] ); ?></td>
+						</tr>
+					<?php endforeach; ?>
+				</tbody>
+			</table>
 			</div>
 			<?php
 		}
@@ -669,7 +756,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					'Invalid URL',
-					'Error'
+					__( 'Error', 'wpfixpath-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -703,7 +790,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					implode( '; ', $warnings ),
-					'Needs review'
+					__( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -718,7 +805,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					implode( '; ', $warnings ),
-					'Error'
+					__( 'Error', 'wpfixpath-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -742,7 +829,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					self::format_warning_text( $warnings ),
-					'Needs review'
+					__( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' )
 				);
 			} else {
 				$check = self::check_url( $linked_url, (float) $settings['timeout'], (int) $settings['max_redirects'], $request_count );
@@ -763,7 +850,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					$check['redirect_count'],
 					$check['final_url'],
 					self::format_warning_text( $warnings ),
-					'Needs review'
+					__( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -780,7 +867,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					$check['redirect_count'],
 					$check['final_url'],
 					self::format_warning_text( $warnings ),
-					'Error'
+					__( 'Error', 'wpfixpath-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -1080,30 +1167,30 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 */
 		private static function result_label_for_check( array $warnings, int $final_status, int $redirect_count, bool $is_old, bool $is_staging ): string {
 			if ( $final_status <= 0 ) {
-				return 'Needs review';
+				return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
 			}
 
 			if ( in_array( $final_status, array( 401, 403, 429 ), true ) ) {
-				return 'Blocked';
+				return __( 'Blocked', 'wpfixpath-redirect-internal-link-auditor' );
 			}
 
 			if ( in_array( $final_status, array( 404, 410 ), true ) || $final_status >= 500 ) {
-				return 'Error';
+				return __( 'Error', 'wpfixpath-redirect-internal-link-auditor' );
 			}
 
 			if ( $final_status >= 400 ) {
-				return 'Needs review';
+				return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
 			}
 
 			if ( $redirect_count > 0 ) {
-				return 'Warning';
+				return __( 'Warning', 'wpfixpath-redirect-internal-link-auditor' );
 			}
 
 			if ( $is_old || $is_staging || ! empty( $warnings ) ) {
-				return 'Needs review';
+				return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
 			}
 
-			return 'OK';
+			return __( 'OK', 'wpfixpath-redirect-internal-link-auditor' );
 		}
 
 		/**
@@ -1118,22 +1205,294 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
+		 * Group broken and redirected link occurrences by normalized destination.
+		 *
+		 * This is a read-only projection of completed result rows. It never issues
+		 * requests and therefore always represents the same scan as the detail view.
+		 *
+		 * @param array<int,array<string,mixed>> $results Result rows.
+		 * @return array<int,array<string,mixed>>
+		 */
+		private static function build_destination_impact( array $results ): array {
+			$groups = array();
+
+			foreach ( $results as $row ) {
+				$redirect_count = isset( $row['redirect_count'] ) && is_numeric( $row['redirect_count'] )
+					? max( 0, (int) $row['redirect_count'] )
+					: 0;
+				$final_status   = self::final_status_from_evidence( isset( $row['http_status'] ) ? (string) $row['http_status'] : '' );
+				$warning        = isset( $row['warning'] ) ? (string) $row['warning'] : '';
+				$result         = isset( $row['result'] ) ? trim( (string) $row['result'] ) : '';
+				$is_broken      = self::result_label_matches( $result, 'Error' ) || in_array( $final_status, array( 404, 410 ), true );
+				$is_redirected  = $redirect_count > 0 || ( $final_status >= 300 && $final_status < 400 );
+
+				if ( ! $is_broken && ! $is_redirected ) {
+					continue;
+				}
+
+				$raw_destination = isset( $row['linked_url'] ) ? trim( (string) $row['linked_url'] ) : '';
+				$destination     = self::normalize_destination_for_impact( $raw_destination );
+				$group_key       = '' !== $destination ? 'url:' . $destination : 'raw:' . $raw_destination;
+				if ( '' === $raw_destination ) {
+					continue;
+				}
+				if ( '' === $destination ) {
+					$destination = $raw_destination;
+				}
+
+				if ( ! isset( $groups[ $group_key ] ) ) {
+					$groups[ $group_key ] = array(
+						'destination_url'       => $destination,
+						'occurrences'            => 0,
+						'source_keys'            => array(),
+						'result'                 => '',
+						'result_rank'            => -1,
+						'has_broken'             => false,
+						'has_redirect'           => false,
+						'http_statuses'          => array(),
+						'max_redirect_count'     => 0,
+						'effective_final_urls'   => array(),
+						'warnings'               => array(),
+					);
+				}
+
+				$groups[ $group_key ]['occurrences']++;
+				$groups[ $group_key ]['has_broken']   = $groups[ $group_key ]['has_broken'] || $is_broken;
+				$groups[ $group_key ]['has_redirect'] = $groups[ $group_key ]['has_redirect'] || $is_redirected;
+				$groups[ $group_key ]['max_redirect_count'] = max( $groups[ $group_key ]['max_redirect_count'], $redirect_count );
+
+				$source_key = self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+				if ( '' === $source_key ) {
+					$source_key = isset( $row['source_url'] ) ? (string) $row['source_url'] : '';
+				}
+				if ( '' !== $source_key ) {
+					$groups[ $group_key ]['source_keys'][ $source_key ] = true;
+				}
+
+				$status_evidence = isset( $row['http_status'] ) ? trim( (string) $row['http_status'] ) : '';
+				if ( '' !== $status_evidence ) {
+					$groups[ $group_key ]['http_statuses'][ $status_evidence ] = true;
+				}
+
+				$raw_final_url = isset( $row['final_url'] ) ? trim( (string) $row['final_url'] ) : '';
+				$final_url     = self::normalize_destination_for_impact( $raw_final_url );
+				if ( '' === $final_url ) {
+					$final_url = $raw_final_url;
+				}
+				if ( '' !== $final_url ) {
+					$groups[ $group_key ]['effective_final_urls'][ $final_url ] = true;
+				}
+
+				if ( '' !== trim( $warning ) && ! self::result_label_matches( trim( $warning ), 'None' ) ) {
+					$groups[ $group_key ]['warnings'][ trim( $warning ) ] = true;
+				}
+
+				$result_rank = self::result_impact_rank( $result );
+				if (
+					$result_rank > $groups[ $group_key ]['result_rank'] ||
+					( $result_rank === $groups[ $group_key ]['result_rank'] && ( '' === $groups[ $group_key ]['result'] || strcmp( $result, $groups[ $group_key ]['result'] ) < 0 ) )
+				) {
+					$groups[ $group_key ]['result']      = $result;
+					$groups[ $group_key ]['result_rank'] = $result_rank;
+				}
+			}
+
+			$impact_rows = array();
+			foreach ( $groups as $group ) {
+				$http_statuses = array_keys( $group['http_statuses'] );
+				$final_urls    = array_keys( $group['effective_final_urls'] );
+				$warnings      = array_keys( $group['warnings'] );
+				sort( $http_statuses, SORT_STRING );
+				sort( $final_urls, SORT_STRING );
+				sort( $warnings, SORT_STRING );
+
+				if ( $group['has_broken'] && $group['has_redirect'] ) {
+					$impact = __( 'Broken/error after redirect', 'wpfixpath-redirect-internal-link-auditor' );
+				} elseif ( $group['has_broken'] ) {
+					$impact = __( 'Broken/error', 'wpfixpath-redirect-internal-link-auditor' );
+				} else {
+					$impact = __( 'Redirect', 'wpfixpath-redirect-internal-link-auditor' );
+				}
+
+				$impact_rows[] = array(
+					'destination_url'       => $group['destination_url'],
+					'impact'                => $impact,
+					'occurrences'           => $group['occurrences'],
+					'affected_sources'      => count( $group['source_keys'] ),
+					'result'                => '' !== $group['result'] ? $group['result'] : __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' ),
+					'result_rank'           => $group['result_rank'],
+					'http_status_evidence'  => implode( ' | ', $http_statuses ),
+					'max_redirect_count'    => $group['max_redirect_count'],
+					'effective_final_url'   => implode( ' | ', $final_urls ),
+					'warning_evidence'      => implode( ' | ', $warnings ),
+				);
+			}
+
+			usort(
+				$impact_rows,
+				static function ( array $left, array $right ): int {
+					if ( $left['result_rank'] !== $right['result_rank'] ) {
+						return $right['result_rank'] <=> $left['result_rank'];
+					}
+					if ( $left['affected_sources'] !== $right['affected_sources'] ) {
+						return $right['affected_sources'] <=> $left['affected_sources'];
+					}
+					if ( $left['occurrences'] !== $right['occurrences'] ) {
+						return $right['occurrences'] <=> $left['occurrences'];
+					}
+
+					return strcmp( $left['destination_url'], $right['destination_url'] );
+				}
+			);
+
+			foreach ( $impact_rows as &$impact_row ) {
+				unset( $impact_row['result_rank'] );
+			}
+			unset( $impact_row );
+
+			return $impact_rows;
+		}
+
+		/**
+		 * Normalize a URL used as an impact-group key.
+		 *
+		 * Scheme and host case and fragments do not create separate groups. Paths,
+		 * query strings, schemes, non-default ports, and trailing slashes remain
+		 * distinct because they can produce different HTTP behavior.
+		 */
+		private static function normalize_destination_for_impact( string $url ): string {
+			$normalized = self::normalize_url_for_compare( $url );
+			$parts      = wp_parse_url( $normalized );
+
+			if ( ! is_array( $parts ) || empty( $parts['scheme'] ) || empty( $parts['host'] ) ) {
+				return '';
+			}
+
+			$scheme = strtolower( (string) $parts['scheme'] );
+			$host   = strtolower( trim( (string) $parts['host'], " \t\n\r\0\x0B." ) );
+			$port   = isset( $parts['port'] ) ? (int) $parts['port'] : 0;
+			if ( ( 'http' === $scheme && 80 === $port ) || ( 'https' === $scheme && 443 === $port ) ) {
+				$port = 0;
+			}
+
+			$path  = isset( $parts['path'] ) && '' !== $parts['path'] ? (string) $parts['path'] : '/';
+			$query = isset( $parts['query'] ) ? '?' . (string) $parts['query'] : '';
+
+			return $scheme . '://' . $host . ( $port > 0 ? ':' . $port : '' ) . $path . $query;
+		}
+
+		/**
+		 * Read the last HTTP status from a displayed status chain.
+		 */
+		private static function final_status_from_evidence( string $evidence ): int {
+			if ( ! preg_match_all( '/\b([1-5][0-9]{2})\b/', $evidence, $matches ) || empty( $matches[1] ) ) {
+				return 0;
+			}
+
+			return (int) end( $matches[1] );
+		}
+
+		/**
+		 * Sort result labels from most actionable to least actionable.
+		 */
+		private static function result_impact_rank( string $result ): int {
+			$ranks = array(
+				'Error'        => 5,
+				'Blocked'      => 4,
+				'Needs review' => 3,
+				'Warning'      => 2,
+				'OK'           => 1,
+			);
+
+			foreach ( $ranks as $label => $rank ) {
+				if ( self::result_label_matches( $result, $label ) ) {
+					return $rank;
+				}
+			}
+
+			return 0;
+		}
+
+		/**
+		 * Compare a display label against its English and translated forms.
+		 */
+		private static function result_label_matches( string $value, string $english_label ): bool {
+			return in_array(
+				$value,
+				array(
+					$english_label,
+					__( $english_label, 'wpfixpath-redirect-internal-link-auditor' ),
+				),
+				true
+			);
+		}
+
+		/**
 		 * Send CSV response and terminate.
 		 *
 		 * @param array<int,array<string,mixed>> $results Result rows.
+		 * @param string                         $report_type Report type: details or impact.
 		 */
-		private static function send_csv( array $results ): void {
+		private static function send_csv( array $results, string $report_type ): void {
 			nocache_headers();
 			header( 'Content-Type: text/csv; charset=utf-8' );
-			header( 'Content-Disposition: attachment; filename=wpfixpath-redirect-internal-link-auditor-' . gmdate( 'Y-m-d-His' ) . '.csv' );
+			$report_type = 'impact' === $report_type ? 'impact' : 'details';
+			header( 'Content-Disposition: attachment; filename=wpfixpath-redirect-internal-link-auditor-' . $report_type . '-' . gmdate( 'Y-m-d-His' ) . '.csv' );
 
 			$output = fopen( 'php://output', 'w' );
 			if ( false === $output ) {
 				exit;
 			}
 
-			fputcsv(
-				$output,
+			foreach ( self::build_csv_rows( $results, $report_type ) as $csv_row ) {
+				fputcsv( $output, $csv_row, ',', '"', '' );
+			}
+
+			fclose( $output );
+			exit;
+		}
+
+		/**
+		 * Build safe CSV rows, including the header, for a report type.
+		 *
+		 * @param array<int,array<string,mixed>> $results Result rows.
+		 * @param string                         $report_type Report type: details or impact.
+		 * @return array<int,array<int,string>>
+		 */
+		private static function build_csv_rows( array $results, string $report_type ): array {
+			if ( 'impact' === $report_type ) {
+				$rows = array(
+					array(
+						'Destination',
+						'Impact',
+						'Occurrences',
+						'Affected Content Items',
+						'Result',
+						'HTTP Status Evidence',
+						'Maximum Observed Redirects',
+						'Observed Final URLs',
+						'Warning Evidence',
+					),
+				);
+
+				foreach ( self::build_destination_impact( $results ) as $row ) {
+					$rows[] = array(
+						self::csv_safe( (string) $row['destination_url'] ),
+						self::csv_safe( (string) $row['impact'] ),
+						self::csv_safe( (string) $row['occurrences'] ),
+						self::csv_safe( (string) $row['affected_sources'] ),
+						self::csv_safe( (string) $row['result'] ),
+						self::csv_safe( (string) $row['http_status_evidence'] ),
+						self::csv_safe( (string) $row['max_redirect_count'] ),
+						self::csv_safe( (string) $row['effective_final_url'] ),
+						self::csv_safe( (string) $row['warning_evidence'] ),
+					);
+				}
+
+				return $rows;
+			}
+
+			$rows = array(
 				array(
 					'Source Post/Page',
 					'Source Type',
@@ -1145,29 +1504,25 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'Warning',
 					'Anchor Text',
 					'Result',
-				)
+				),
 			);
 
 			foreach ( $results as $row ) {
-				fputcsv(
-					$output,
-					array(
-						self::csv_safe( (string) $row['source_title'] ),
-						self::csv_safe( (string) $row['source_type'] ),
-						self::csv_safe( (string) $row['source_url'] ),
-						self::csv_safe( (string) $row['linked_url'] ),
-						self::csv_safe( (string) $row['http_status'] ),
-						self::csv_safe( (string) $row['redirect_count'] ),
-						self::csv_safe( (string) $row['final_url'] ),
-						self::csv_safe( (string) $row['warning'] ),
-						self::csv_safe( (string) $row['anchor_text'] ),
-						self::csv_safe( (string) $row['result'] ),
-					)
+				$rows[] = array(
+					self::csv_safe( (string) $row['source_title'] ),
+					self::csv_safe( (string) $row['source_type'] ),
+					self::csv_safe( (string) $row['source_url'] ),
+					self::csv_safe( (string) $row['linked_url'] ),
+					self::csv_safe( (string) $row['http_status'] ),
+					self::csv_safe( (string) $row['redirect_count'] ),
+					self::csv_safe( (string) $row['final_url'] ),
+					self::csv_safe( (string) $row['warning'] ),
+					self::csv_safe( (string) $row['anchor_text'] ),
+					self::csv_safe( (string) $row['result'] ),
 				);
 			}
 
-			fclose( $output );
-			exit;
+			return $rows;
 		}
 
 		/**
@@ -1225,7 +1580,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		private static function csv_safe( string $value ): string {
 			$value = str_replace( array( "\r\n", "\r" ), "\n", $value );
 
-			if ( '' !== $value && preg_match( '/^[=+\-@\t]/', $value ) ) {
+			if ( '' !== $value && preg_match( '/^[\x00-\x20]*[=+\-@]/', $value ) ) {
 				return "'" . $value;
 			}
 

@@ -14,6 +14,7 @@ $GLOBALS['wpfixpath_test_responses']  = array();
 $GLOBALS['wpfixpath_test_transients'] = array();
 $GLOBALS['wpfixpath_test_user_id']    = 7;
 $GLOBALS['wpfixpath_test_uuid_count'] = 0;
+$GLOBALS['wpfixpath_test_translations'] = array();
 
 class WP_Error {
 	/** @var string */
@@ -39,7 +40,9 @@ function wp_parse_url( string $url, int $component = -1 ) {
 	return -1 === $component ? parse_url( $url ) : parse_url( $url, $component );
 }
 function __( string $text ): string {
-	return $text;
+	return isset( $GLOBALS['wpfixpath_test_translations'][ $text ] )
+		? $GLOBALS['wpfixpath_test_translations'][ $text ]
+		: $text;
 }
 function is_wp_error( $value ): bool {
 	return $value instanceof WP_Error;
@@ -114,12 +117,253 @@ function wpfixpath_response( int $status, string $location = '' ): array {
 	);
 }
 
+/**
+ * Build one complete stored result row for report tests.
+ *
+ * @return array<string,mixed>
+ */
+function wpfixpath_result_row(
+	string $source_url,
+	string $linked_url,
+	string $http_status,
+	int $redirect_count,
+	string $final_url,
+	string $warning,
+	string $result,
+	string $source_title = 'Source',
+	string $anchor_text = 'Link'
+): array {
+	return array(
+		'source_title'    => $source_title,
+		'source_type'     => 'Page',
+		'source_url'      => $source_url,
+		'source_edit_url' => 'https://example.test/wp-admin/post.php?post=1&action=edit',
+		'linked_url'      => $linked_url,
+		'http_status'     => $http_status,
+		'redirect_count'  => $redirect_count,
+		'final_url'       => $final_url,
+		'warning'         => $warning,
+		'anchor_text'     => $anchor_text,
+		'result'          => $result,
+	);
+}
+
 $without_slash = wpfixpath_invoke( 'normalize_url_for_compare', array( 'https://Example.test/foo#section' ) );
 $with_slash    = wpfixpath_invoke( 'normalize_url_for_compare', array( 'https://example.test/foo/' ) );
 wpfixpath_assert_same( 'https://example.test/foo', $without_slash, 'The cache key should normalize scheme and host case.' );
 wpfixpath_assert_same( 'https://example.test/foo/', $with_slash, 'The cache key should preserve a trailing slash.' );
 $resolved_with_query = wpfixpath_invoke( 'make_absolute_url', array( '/foo/?page=2', 'https://example.test/source/' ) );
 wpfixpath_assert_same( 'https://example.test/foo/?page=2', $resolved_with_query, 'Relative redirect resolution should preserve a trailing slash before a query string.' );
+
+$normalized_destination = wpfixpath_invoke( 'normalize_destination_for_impact', array( 'https://Example.test:443/foo#section' ) );
+wpfixpath_assert_same( 'https://example.test/foo', $normalized_destination, 'Impact grouping should normalize scheme/host case, default ports, and fragments.' );
+wpfixpath_assert_same(
+	'https://example.test/foo/?page=2',
+	wpfixpath_invoke( 'normalize_destination_for_impact', array( 'https://example.test/foo/?page=2#fragment' ) ),
+	'Impact grouping should preserve trailing slashes and query strings.'
+);
+
+$impact_input = array(
+	wpfixpath_result_row(
+		'https://Example.test/source-a#top',
+		'https://Example.test:443/broken#first',
+		'404',
+		0,
+		'https://example.test/broken',
+		'Broken link (404)',
+		'Error'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-a',
+		'https://example.test/broken#second',
+		'404',
+		0,
+		'https://example.test/broken',
+		'Broken link (404)',
+		'Error'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-b',
+		'https://example.test/broken',
+		'301 -> 404',
+		1,
+		'https://example.test/gone',
+		'Redirect (301); Broken link (404)',
+		'Error'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-c',
+		'https://example.test/broken/',
+		'410',
+		0,
+		'https://example.test/broken/',
+		'Broken link (410)',
+		'Error'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-d',
+		'https://example.test/server-error',
+		'503',
+		0,
+		'https://example.test/server-error',
+		'HTTP error (503)',
+		'Error'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-e',
+		'https://example.test/no-location',
+		'302',
+		0,
+		'https://example.test/no-location',
+		'Redirect without final target (302)',
+		'Needs review'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-f',
+		'https://example.test/alpha',
+		'301 -> 200',
+		1,
+		'https://example.test/new-alpha',
+		'Redirect (301)',
+		'Warning'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-g',
+		'https://example.test/beta',
+		'301 -> 200',
+		1,
+		'https://example.test/new-beta',
+		'Redirect (301)',
+		'Warning'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-h',
+		'https://example.test/query?id=1',
+		'302 -> 200',
+		1,
+		'https://example.test/new-query?id=1',
+		'Redirect (302)',
+		'Warning'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-i',
+		'https://example.test/query?id=2',
+		'302 -> 200',
+		1,
+		'https://example.test/new-query?id=2',
+		'Redirect (302)',
+		'Warning'
+	),
+	wpfixpath_result_row(
+		'https://example.test/source-z',
+		'https://example.test/healthy',
+		'200',
+		0,
+		'https://example.test/healthy',
+		'None',
+		'OK'
+	),
+);
+
+$http_calls_before_impact = count( $GLOBALS['wpfixpath_test_http_calls'] );
+$impact_rows              = wpfixpath_invoke( 'build_destination_impact', array( $impact_input ) );
+wpfixpath_assert_same( $http_calls_before_impact, count( $GLOBALS['wpfixpath_test_http_calls'] ), 'Impact aggregation must not make HTTP requests.' );
+wpfixpath_assert_same( 8, count( $impact_rows ), 'Only broken/error and redirected destinations should appear in the impact view.' );
+wpfixpath_assert_same( 'https://example.test/broken', $impact_rows[0]['destination_url'], 'The highest-impact destination should sort first.' );
+wpfixpath_assert_same( 3, $impact_rows[0]['occurrences'], 'Repeated links should count as separate occurrences.' );
+wpfixpath_assert_same( 2, $impact_rows[0]['affected_sources'], 'Repeated links in one source should count as one affected content item.' );
+wpfixpath_assert_same( 'Broken/error after redirect', $impact_rows[0]['impact'], 'A broken target with redirect evidence should expose both conditions.' );
+wpfixpath_assert_same( '301 -> 404 | 404', $impact_rows[0]['http_status_evidence'], 'Status variants should be deduplicated and sorted deterministically.' );
+wpfixpath_assert_same( 1, $impact_rows[0]['max_redirect_count'], 'The aggregate should retain the maximum observed redirect count.' );
+wpfixpath_assert_same(
+	'https://example.test/broken | https://example.test/gone',
+	$impact_rows[0]['effective_final_url'],
+	'All distinct effective final URLs should be preserved as deterministic evidence.'
+);
+
+$impact_destinations = array_column( $impact_rows, 'destination_url' );
+wpfixpath_assert_same(
+	array(
+		'https://example.test/broken',
+		'https://example.test/broken/',
+		'https://example.test/server-error',
+		'https://example.test/no-location',
+		'https://example.test/alpha',
+		'https://example.test/beta',
+		'https://example.test/query?id=1',
+		'https://example.test/query?id=2',
+	),
+	$impact_destinations,
+	'Impact rows should preserve trailing-slash/query distinctions and use explicit deterministic tie ordering.'
+);
+wpfixpath_assert_same( 'Redirect', $impact_rows[3]['impact'], 'A terminal redirect without a Location header must still appear as redirect impact.' );
+
+$GLOBALS['wpfixpath_test_translations'] = array(
+	'Error'        => 'Fehler',
+	'Broken/error' => 'Defekt/Fehler',
+);
+$localized_impact = wpfixpath_invoke(
+	'build_destination_impact',
+	array(
+		array(
+			wpfixpath_result_row(
+				'https://example.test/source',
+				'not a valid absolute URL',
+				'',
+				0,
+				'',
+				'Ungültige URL',
+				'Fehler'
+			),
+		),
+	)
+);
+wpfixpath_assert_same( 1, count( $localized_impact ), 'Localized Error results should remain actionable without English warning matching.' );
+wpfixpath_assert_same( 'not a valid absolute URL', $localized_impact[0]['destination_url'], 'Invalid linked URLs should remain visible under a raw fallback group key.' );
+wpfixpath_assert_same( 'Defekt/Fehler', $localized_impact[0]['impact'], 'Impact labels should use the active translation.' );
+wpfixpath_assert_same( 'Fehler', $localized_impact[0]['result'], 'Localized result labels should retain their severity.' );
+$GLOBALS['wpfixpath_test_translations'] = array();
+
+$details_csv = wpfixpath_invoke(
+	'build_csv_rows',
+	array(
+		array(
+			wpfixpath_result_row(
+				'https://example.test/source',
+				'https://example.test/broken',
+				'404',
+				0,
+				'https://example.test/broken',
+				'Broken link (404)',
+				'Error',
+				' =HYPERLINK("https://attacker.test")',
+				"\n+SUM(1,1)"
+			),
+		),
+		'details',
+	)
+);
+wpfixpath_assert_same( 'Source Post/Page', $details_csv[0][0], 'Detailed CSV should retain its existing first column.' );
+wpfixpath_assert_same( '\' =HYPERLINK("https://attacker.test")', $details_csv[1][0], 'CSV safety should block formulas after leading spaces.' );
+wpfixpath_assert_same( "'\n+SUM(1,1)", $details_csv[1][8], 'CSV safety should block formulas after leading newlines.' );
+
+$impact_csv_input = array(
+	wpfixpath_result_row(
+		'https://example.test/source',
+		'https://example.test/broken',
+		'404',
+		0,
+		'https://example.test/broken',
+		'=IMPORTXML("https://attacker.test") Broken link (404)',
+		'Error'
+	),
+);
+$impact_csv = wpfixpath_invoke( 'build_csv_rows', array( $impact_csv_input, 'impact' ) );
+wpfixpath_assert_same( 'Destination', $impact_csv[0][0], 'Impact CSV should have a destination-centric header.' );
+wpfixpath_assert_same( '\'=IMPORTXML("https://attacker.test") Broken link (404)', $impact_csv[1][8], 'Impact evidence should receive the same CSV formula protection.' );
+wpfixpath_assert_same( "'\t@SUM(1,1)", wpfixpath_invoke( 'csv_safe', array( "\t@SUM(1,1)" ) ), 'CSV safety should block formulas after a leading tab.' );
+wpfixpath_assert_same( "'-2+3", wpfixpath_invoke( 'csv_safe', array( '-2+3' ) ), 'CSV safety should block minus-prefixed formulas.' );
+wpfixpath_assert_same( ' ordinary text', wpfixpath_invoke( 'csv_safe', array( ' ordinary text' ) ), 'CSV safety should not alter non-formula text.' );
 
 $GLOBALS['wpfixpath_test_http_calls'] = array();
 $GLOBALS['wpfixpath_test_responses']  = array(

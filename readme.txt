@@ -3,7 +3,7 @@ Contributors: wpfixpath, indexlane
 Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Requires PHP: 7.4
-Stable tag: 0.1.3
+Stable tag: 0.2.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -15,7 +15,7 @@ WPFixPath Redirect & Internal Link Auditor finds internal content links that ret
 
 It runs from inside WordPress admin, stays read-only, and produces evidence a site owner or developer can review or export. It does not auto-fix content or mutate the database.
 
-Version 0.1 can:
+Version 0.2 can:
 
 * Scan published posts, pages, and products when those post types exist.
 * Extract links from post content.
@@ -25,19 +25,25 @@ Version 0.1 can:
 * Flag links to old domains supplied by the administrator.
 * Flag common staging and development-domain links.
 * Show the source post/page.
-* Export a CSV report.
+* Group broken/error and redirected destinations by occurrence count and distinct affected content count.
+* Show status, redirect, effective-final-URL, warning, and result evidence for each destination.
+* Export separate destination-impact and detailed-row CSV reports.
+
+The destination-impact view is derived from the completed occurrence rows. It does not make more HTTP requests. Two links to one destination in the same page count as two occurrences and one affected content item.
+
+Destination grouping normalizes scheme and host case, fragments, and default ports. Paths, query strings, schemes, non-default ports, and trailing slashes remain distinct because they can return different evidence.
 
 HTTP requests are made only to the current site. Links to old, staging, or development domains are still reported for review.
 
 == Data handling ==
 
-Scans run on demand from WordPress admin. Completed results are stored in a per-user WordPress transient for up to one hour so CSV export can reuse the displayed evidence without scanning again.
+Scans run on demand from WordPress admin. Completed results are stored in a per-user WordPress transient for up to one hour so both CSV exports can reuse the displayed evidence without scanning again.
 
 The plugin does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
 
 == Limits ==
 
-Version 0.1 scans links found in WordPress post, page, and product content. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
+Version 0.2 scans links found in WordPress post, page, and product content. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
 
 == Installation ==
 
@@ -45,13 +51,13 @@ Version 0.1 scans links found in WordPress post, page, and product content. It d
 2. Activate the plugin in WordPress admin.
 3. Go to `Tools -> Redirect & Internal Link Auditor`.
 4. Select the content types and scan limits.
-5. Run checks or export a CSV report.
+5. Run checks or export the destination-impact or detailed-row CSV report.
 
 == Frequently Asked Questions ==
 
 = Does this plugin change links or content? =
 
-No. Version 0.1 is read-only and diagnostic only.
+No. Version 0.2 is read-only and diagnostic only.
 
 = Does this plugin store scan results? =
 
@@ -63,14 +69,23 @@ No. It uses WordPress HTTP requests and local WordPress content only.
 
 = Does this plugin check external links? =
 
-No in v0.1. Old, staging, and development-domain links are flagged but not fetched.
+No in v0.2. Old, staging, and development-domain links are flagged but not fetched.
 
 == Screenshots ==
 
 1. Admin scan settings for content type selection, old-domain input, scan limits, and status-check options.
-2. Results table with source page, linked URL, status evidence, warnings, and CSV export.
+2. Occurrence-level results with source URLs, status evidence, redirect details, and warnings.
 
 == Changelog ==
+
+= 0.2.0 =
+
+* Added a destination-centric impact view for broken/error and redirected targets.
+* Added occurrence and distinct affected-content counts.
+* Added deterministic severity and impact ordering.
+* Added a separate destination-impact CSV while preserving detailed-row export behavior.
+* Kept aggregation read-only and derived from the exact saved scan.
+* Strengthened CSV formula-injection protection for values with leading whitespace.
 
 = 0.1.3 =
 
