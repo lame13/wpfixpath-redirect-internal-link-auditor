@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.2.1
+
+- Prepared plugin metadata and packaging for the WordPress.org Plugin Directory.
+- Removed the third-party `Update URI` so WordPress.org can deliver plugin updates.
+- Declared compatibility testing through WordPress 7.1.
+- Corrected the WordPress.org contributor metadata.
+- Resolved Plugin Check findings for translation loading, nonce verification, translatable labels, and CSV output.
+- Moved the project release history to this root changelog instead of duplicating it in the README.
+
 ## 0.2.0
 
 - Added a destination-centric impact view for broken/error and redirected targets.

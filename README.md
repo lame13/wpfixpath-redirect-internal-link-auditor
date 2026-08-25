@@ -100,17 +100,6 @@ Both exports protect spreadsheet cells that could otherwise be interpreted as fo
 
 Labels are intentionally conservative. The plugin reports link evidence; it does not guess SEO impact.
 
-## Changelog
-
-### 0.2.0
-
-- Added the destination-centric impact view for broken/error and redirected targets.
-- Added occurrence and distinct affected-content counts.
-- Added deterministic severity and impact ordering.
-- Added a separate destination-impact CSV while preserving the detailed-row export.
-- Kept aggregation read-only and derived from the exact saved scan.
-- Strengthened CSV formula-injection protection for values with leading whitespace.
-
 ## Development
 
 Run a syntax check before packaging:
@@ -130,3 +119,11 @@ Then activate the plugin and open:
 ```text
 Tools -> Redirect & Internal Link Auditor
 ```
+
+Build the production ZIP for WordPress.org submission:
+
+```bash
+./scripts/build-wordpress-org-zip.sh
+```
+
+Release history is maintained in [CHANGELOG.md](CHANGELOG.md).

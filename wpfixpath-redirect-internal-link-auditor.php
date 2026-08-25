@@ -3,7 +3,7 @@
  * Plugin Name: WPFixPath Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor/
  * Description: Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
- * Version: 0.2.0
+ * Version: 0.2.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -11,7 +11,6 @@
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
  * Text Domain: wpfixpath-redirect-internal-link-auditor
- * Update URI: https://indexlane.dev/plugins/redirect-internal-link-auditor/
  *
  * @package WPFixPath_Redirect_Internal_Link_Auditor
  */
@@ -25,7 +24,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
 	final class WPFixPath_Redirect_Internal_Link_Auditor {
-		private const VERSION                  = '0.2.0';
+		private const VERSION                  = '0.2.1';
 		private const SLUG                     = 'wpfixpath-redirect-internal-link-auditor';
 		private const CAPABILITY               = 'manage_options';
 		private const NONCE_ACTION             = 'wpfixpath_rila_run_scan';
@@ -39,20 +38,8 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 * Boot the plugin.
 		 */
 		public static function init(): void {
-			add_action( 'plugins_loaded', array( __CLASS__, 'load_textdomain' ) );
 			add_action( 'admin_menu', array( __CLASS__, 'register_admin_page' ) );
 			add_action( 'admin_init', array( __CLASS__, 'maybe_export_csv' ) );
-		}
-
-		/**
-		 * Load translations when available.
-		 */
-		public static function load_textdomain(): void {
-			load_plugin_textdomain(
-				'wpfixpath-redirect-internal-link-auditor',
-				false,
-				dirname( plugin_basename( __FILE__ ) ) . '/languages'
-			);
 		}
 
 		/**
@@ -117,10 +104,13 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			$scan     = null;
 
 			if ( 'POST' === self::server_request_method() ) {
-				$action = isset( $_POST['wpfixpath_rila_action'] ) ? sanitize_key( wp_unslash( $_POST['wpfixpath_rila_action'] ) ) : '';
+				check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
+				$post_data = wp_unslash( $_POST );
+				$action    = isset( $post_data['wpfixpath_rila_action'] ) && is_scalar( $post_data['wpfixpath_rila_action'] )
+					? sanitize_key( (string) $post_data['wpfixpath_rila_action'] )
+					: '';
 				if ( 'run' === $action ) {
-					check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
-					$settings = self::get_request_settings();
+					$settings = self::get_request_settings( $post_data );
 					$scan     = self::run_scan( $settings );
 					$scan['export_token'] = self::store_export_results( $scan['results'] );
 				}
@@ -529,13 +519,13 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
-		 * Sanitize scan settings from POST.
+		 * Sanitize submitted scan settings.
 		 *
+		 * @param array<string,mixed> $post_data Unslashed and nonce-verified request data.
 		 * @return array<string,mixed>
 		 */
-		private static function get_request_settings(): array {
+		private static function get_request_settings( array $post_data ): array {
 			$settings        = self::default_settings();
-			$post_data       = wp_unslash( $_POST );
 			$available_types = array_keys( self::get_available_post_types() );
 
 			$post_types = isset( $post_data['post_types'] ) && is_array( $post_data['post_types'] ) ? $post_data['post_types'] : array();
@@ -1421,10 +1411,32 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				$value,
 				array(
 					$english_label,
-					__( $english_label, 'wpfixpath-redirect-internal-link-auditor' ),
+					self::translated_result_label( $english_label ),
 				),
 				true
 			);
+		}
+
+		/**
+		 * Return the translated form of a known result label.
+		 */
+		private static function translated_result_label( string $english_label ): string {
+			switch ( $english_label ) {
+				case 'Error':
+					return __( 'Error', 'wpfixpath-redirect-internal-link-auditor' );
+				case 'Blocked':
+					return __( 'Blocked', 'wpfixpath-redirect-internal-link-auditor' );
+				case 'Needs review':
+					return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
+				case 'Warning':
+					return __( 'Warning', 'wpfixpath-redirect-internal-link-auditor' );
+				case 'OK':
+					return __( 'OK', 'wpfixpath-redirect-internal-link-auditor' );
+				case 'None':
+					return __( 'None', 'wpfixpath-redirect-internal-link-auditor' );
+				default:
+					return $english_label;
+			}
 		}
 
 		/**
@@ -1448,7 +1460,6 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				fputcsv( $output, $csv_row, ',', '"', '' );
 			}
 
-			fclose( $output );
 			exit;
 		}
 

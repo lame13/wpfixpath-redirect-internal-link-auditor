@@ -1,9 +1,10 @@
 === WPFixPath Redirect & Internal Link Auditor ===
-Contributors: wpfixpath, indexlane
+Contributors: wpfixpath
 Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
+Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.2.0
+Stable tag: 0.2.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -77,6 +78,14 @@ No in v0.2. Old, staging, and development-domain links are flagged but not fetch
 2. Occurrence-level results with source URLs, status evidence, redirect details, and warnings.
 
 == Changelog ==
+
+= 0.2.1 =
+
+* Prepared plugin metadata and packaging for the WordPress.org Plugin Directory.
+* Removed the third-party Update URI so WordPress.org can deliver plugin updates.
+* Declared compatibility testing through WordPress 7.1.
+* Corrected the WordPress.org contributor metadata.
+* Resolved Plugin Check findings for translation loading, nonce verification, translatable labels, and CSV output.
 
 = 0.2.0 =
 

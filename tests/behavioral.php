@@ -95,7 +95,9 @@ require dirname( __DIR__ ) . '/wpfixpath-redirect-internal-link-auditor.php';
  */
 function wpfixpath_invoke( string $method, array $arguments = array() ) {
 	$reflection = new ReflectionMethod( 'WPFixPath_Redirect_Internal_Link_Auditor', $method );
-	$reflection->setAccessible( true );
+	if ( PHP_VERSION_ID < 80100 ) {
+		$reflection->setAccessible( true );
+	}
 	return $reflection->invokeArgs( null, $arguments );
 }
 
