@@ -100,15 +100,15 @@ jobs:
 
       - name: Copy plugin into WordPress
         run: |
-          mkdir -p /tmp/wp/wp-content/plugins/wpfixpath-redirect-internal-link-auditor
+          mkdir -p /tmp/wp/wp-content/plugins/indexlane-redirect-internal-link-auditor
           rsync -a \
             --exclude='.git' \
             --exclude='.github' \
             --exclude='vendor' \
-            ./ /tmp/wp/wp-content/plugins/wpfixpath-redirect-internal-link-auditor/
+            ./ /tmp/wp/wp-content/plugins/indexlane-redirect-internal-link-auditor/
 
       - name: Activate plugin
         run: |
-          wp plugin activate wpfixpath-redirect-internal-link-auditor --path=/tmp/wp
-          wp plugin status wpfixpath-redirect-internal-link-auditor --path=/tmp/wp
-          wp eval 'if ( ! class_exists( "WPFixPath_Redirect_Internal_Link_Auditor" ) ) { fwrite( STDERR, "Plugin class not loaded.\n" ); exit( 1 ); }' --path=/tmp/wp
+          wp plugin activate indexlane-redirect-internal-link-auditor --path=/tmp/wp
+          wp plugin status indexlane-redirect-internal-link-auditor --path=/tmp/wp
+          wp eval 'if ( ! class_exists( "IndexLane_Redirect_Internal_Link_Auditor" ) ) { fwrite( STDERR, "Plugin class not loaded.\n" ); exit( 1 ); }' --path=/tmp/wp

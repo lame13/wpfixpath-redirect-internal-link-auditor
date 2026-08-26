@@ -1,4 +1,4 @@
-# WPFixPath Redirect & Internal Link Auditor
+# IndexLane Redirect & Internal Link Auditor
 
 Find broken, redirected, old-domain, and staging-domain links inside WordPress post, page, and product content.
 
@@ -49,7 +49,7 @@ Checks run on demand inside wp-admin. Results are shown for the current run and 
 
 Completed results are cached in a per-user WordPress transient for up to one hour so both exports contain the exact evidence shown on screen. Destination impact is derived from those saved rows. The plugin does not create custom database tables.
 
-The plugin does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
+The plugin does not create an account, call an IndexLane service, or add frontend tracking.
 
 ## Limits
 
@@ -105,7 +105,7 @@ Labels are intentionally conservative. The plugin reports link evidence; it does
 Run a syntax check before packaging:
 
 ```bash
-php -l wpfixpath-redirect-internal-link-auditor.php
+php -l indexlane-redirect-internal-link-auditor.php
 ```
 
 For a manual WordPress check, copy or symlink this folder into:

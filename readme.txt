@@ -1,10 +1,10 @@
-=== WPFixPath Redirect & Internal Link Auditor ===
+=== IndexLane Redirect & Internal Link Auditor ===
 Contributors: wpfixpath
 Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.2.1
+Stable tag: 0.2.2
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -12,7 +12,7 @@ Find broken, redirected, old-domain, and staging-domain links inside WordPress c
 
 == Description ==
 
-WPFixPath Redirect & Internal Link Auditor finds internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains.
+IndexLane Redirect & Internal Link Auditor finds internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains.
 
 It runs from inside WordPress admin, stays read-only, and produces evidence a site owner or developer can review or export. It does not auto-fix content or mutate the database.
 
@@ -40,7 +40,7 @@ HTTP requests are made only to the current site. Links to old, staging, or devel
 
 Scans run on demand from WordPress admin. Completed results are stored in a per-user WordPress transient for up to one hour so both CSV exports can reuse the displayed evidence without scanning again.
 
-The plugin does not create an account, call an IndexLane/WPFixPath service, or add frontend tracking.
+The plugin does not create an account, call an IndexLane service, or add frontend tracking.
 
 == Limits ==
 
@@ -48,7 +48,7 @@ Version 0.2 scans links found in WordPress post, page, and product content. It d
 
 == Installation ==
 
-1. Upload the `wpfixpath-redirect-internal-link-auditor` folder to `/wp-content/plugins/`.
+1. Upload the `indexlane-redirect-internal-link-auditor` folder to `/wp-content/plugins/`.
 2. Activate the plugin in WordPress admin.
 3. Go to `Tools -> Redirect & Internal Link Auditor`.
 4. Select the content types and scan limits.
@@ -79,8 +79,13 @@ No in v0.2. Old, staging, and development-domain links are flagged but not fetch
 
 == Changelog ==
 
+= 0.2.2 =
+
+* Moved the admin page CSS into a stylesheet enqueued only on the plugin's Tools screen.
+
 = 0.2.1 =
 
+* Renamed the pre-approval plugin to IndexLane Redirect & Internal Link Auditor and aligned its slug and text domain.
 * Prepared plugin metadata and packaging for the WordPress.org Plugin Directory.
 * Removed the third-party Update URI so WordPress.org can deliver plugin updates.
 * Declared compatibility testing through WordPress 7.1.

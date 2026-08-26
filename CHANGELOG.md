@@ -1,7 +1,12 @@
 # Changelog
 
+## 0.2.2
+
+- Moved the admin page CSS into a stylesheet enqueued only on the plugin's Tools screen.
+
 ## 0.2.1
 
+- Renamed the pre-approval plugin to IndexLane Redirect & Internal Link Auditor and aligned its slug, text domain, runtime identifiers, tests, and package layout.
 - Prepared plugin metadata and packaging for the WordPress.org Plugin Directory.
 - Removed the third-party `Update URI` so WordPress.org can deliver plugin updates.
 - Declared compatibility testing through WordPress 7.1.

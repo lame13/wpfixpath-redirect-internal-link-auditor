@@ -1,0 +1,45 @@
+.indexlane-rila-wrap .indexlane-rila-checkbox {
+	display: inline-block;
+	margin-right: 18px;
+}
+
+.indexlane-rila-wrap .indexlane-rila-inline-field {
+	display: inline-block;
+	margin-left: 18px;
+}
+
+.indexlane-rila-wrap input[type="number"] {
+	margin-left: 6px;
+	width: 86px;
+}
+
+.indexlane-rila-results {
+	margin-top: 24px;
+}
+
+.indexlane-rila-results table {
+	table-layout: fixed;
+}
+
+.indexlane-rila-results .indexlane-rila-impact-table {
+	table-layout: auto;
+}
+
+.indexlane-rila-table-scroll {
+	overflow-x: auto;
+	-webkit-overflow-scrolling: touch;
+}
+
+.indexlane-rila-table-scroll .indexlane-rila-impact-table {
+	min-width: 1180px;
+}
+
+.indexlane-rila-table-scroll .indexlane-rila-occurrence-table {
+	min-width: 1380px;
+}
+
+.indexlane-rila-results td,
+.indexlane-rila-results th {
+	vertical-align: top;
+	word-break: break-word;
+}

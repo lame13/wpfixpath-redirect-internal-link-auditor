@@ -1,44 +1,52 @@
 <?php
 /**
- * Plugin Name: WPFixPath Redirect & Internal Link Auditor
+ * Plugin Name: IndexLane Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor/
  * Description: Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
- * Version: 0.2.1
+ * Version: 0.2.2
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
  * Author URI: https://indexlane.dev
  * License: GPLv2 or later
  * License URI: https://www.gnu.org/licenses/gpl-2.0.html
- * Text Domain: wpfixpath-redirect-internal-link-auditor
+ * Text Domain: indexlane-redirect-internal-link-auditor
  *
- * @package WPFixPath_Redirect_Internal_Link_Auditor
+ * @package IndexLane_Redirect_Internal_Link_Auditor
  */
 
 if ( ! defined( 'ABSPATH' ) ) {
 	exit;
 }
 
-if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
+if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	/**
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
-	final class WPFixPath_Redirect_Internal_Link_Auditor {
-		private const VERSION                  = '0.2.1';
-		private const SLUG                     = 'wpfixpath-redirect-internal-link-auditor';
+	final class IndexLane_Redirect_Internal_Link_Auditor {
+		private const VERSION                  = '0.2.2';
+		private const SLUG                     = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY               = 'manage_options';
-		private const NONCE_ACTION             = 'wpfixpath_rila_run_scan';
-		private const NONCE_NAME               = 'wpfixpath_rila_nonce';
+		private const NONCE_ACTION             = 'indexlane_rila_run_scan';
+		private const NONCE_NAME               = 'indexlane_rila_nonce';
 		private const MAX_HTTP_REQUESTS         = 250;
 		private const RESPONSE_SIZE_LIMIT       = 4096;
-		private const EXPORT_TRANSIENT_PREFIX   = 'wpfixpath_rila_export_';
+		private const EXPORT_TRANSIENT_PREFIX   = 'indexlane_rila_export_';
 		private const EXPORT_TRANSIENT_LIFETIME = 3600;
+
+		/**
+		 * Hook suffix for the plugin's Tools screen.
+		 *
+		 * @var string
+		 */
+		private static $admin_page_hook = '';
 
 		/**
 		 * Boot the plugin.
 		 */
 		public static function init(): void {
 			add_action( 'admin_menu', array( __CLASS__, 'register_admin_page' ) );
+			add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_admin_styles' ) );
 			add_action( 'admin_init', array( __CLASS__, 'maybe_export_csv' ) );
 		}
 
@@ -46,12 +54,30 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 * Register Tools admin page.
 		 */
 		public static function register_admin_page(): void {
-			add_management_page(
-				__( 'Redirect & Internal Link Auditor', 'wpfixpath-redirect-internal-link-auditor' ),
-				__( 'Redirect & Internal Link Auditor', 'wpfixpath-redirect-internal-link-auditor' ),
+			$hook_suffix = add_management_page(
+				__( 'Redirect & Internal Link Auditor', 'indexlane-redirect-internal-link-auditor' ),
+				__( 'Redirect & Internal Link Auditor', 'indexlane-redirect-internal-link-auditor' ),
 				self::CAPABILITY,
 				self::SLUG,
 				array( __CLASS__, 'render_admin_page' )
+			);
+
+			self::$admin_page_hook = is_string( $hook_suffix ) ? $hook_suffix : '';
+		}
+
+		/**
+		 * Enqueue styles only on the plugin's Tools screen.
+		 */
+		public static function enqueue_admin_styles( string $hook_suffix ): void {
+			if ( '' === self::$admin_page_hook || self::$admin_page_hook !== $hook_suffix ) {
+				return;
+			}
+
+			wp_enqueue_style(
+				'indexlane-rila-admin',
+				plugins_url( 'assets/admin.css', __FILE__ ),
+				array(),
+				self::VERSION
 			);
 		}
 
@@ -72,7 +98,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				return;
 			}
 
-			$action = isset( $_POST['wpfixpath_rila_action'] ) ? sanitize_key( wp_unslash( $_POST['wpfixpath_rila_action'] ) ) : '';
+			$action = isset( $_POST['indexlane_rila_action'] ) ? sanitize_key( wp_unslash( $_POST['indexlane_rila_action'] ) ) : '';
 			if ( ! in_array( $action, array( 'export', 'export_details', 'export_impact' ), true ) ) {
 				return;
 			}
@@ -85,7 +111,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			$results      = self::get_export_results( $export_token );
 
 			if ( null === $results ) {
-				wp_die( esc_html__( 'The saved scan is unavailable or has expired. Run the checks again before exporting.', 'wpfixpath-redirect-internal-link-auditor' ) );
+				wp_die( esc_html__( 'The saved scan is unavailable or has expired. Run the checks again before exporting.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 
 			$report_type = 'export_impact' === $action ? 'impact' : 'details';
@@ -97,7 +123,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 */
 		public static function render_admin_page(): void {
 			if ( ! current_user_can( self::CAPABILITY ) ) {
-				wp_die( esc_html__( 'You do not have permission to access this page.', 'wpfixpath-redirect-internal-link-auditor' ) );
+				wp_die( esc_html__( 'You do not have permission to access this page.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 
 			$settings = self::default_settings();
@@ -106,8 +132,8 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			if ( 'POST' === self::server_request_method() ) {
 				check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
 				$post_data = wp_unslash( $_POST );
-				$action    = isset( $post_data['wpfixpath_rila_action'] ) && is_scalar( $post_data['wpfixpath_rila_action'] )
-					? sanitize_key( (string) $post_data['wpfixpath_rila_action'] )
+				$action    = isset( $post_data['indexlane_rila_action'] ) && is_scalar( $post_data['indexlane_rila_action'] )
+					? sanitize_key( (string) $post_data['indexlane_rila_action'] )
 					: '';
 				if ( 'run' === $action ) {
 					$settings = self::get_request_settings( $post_data );
@@ -117,23 +143,23 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			}
 
 			?>
-			<div class="wrap wpfixpath-rila-wrap">
-				<h1><?php esc_html_e( 'Redirect & Internal Link Auditor', 'wpfixpath-redirect-internal-link-auditor' ); ?></h1>
+			<div class="wrap indexlane-rila-wrap">
+				<h1><?php esc_html_e( 'Redirect & Internal Link Auditor', 'indexlane-redirect-internal-link-auditor' ); ?></h1>
 
 				<p>
-					<?php esc_html_e( 'Find internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+					<?php esc_html_e( 'Find internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains.', 'indexlane-redirect-internal-link-auditor' ); ?>
 				</p>
 
-				<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="wpfixpath-rila-form">
+				<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-form">
 					<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 
 					<table class="form-table" role="presentation">
 						<tbody>
 							<tr>
-								<th scope="row"><?php esc_html_e( 'Content types', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+								<th scope="row"><?php esc_html_e( 'Content types', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 								<td>
 									<?php foreach ( self::get_available_post_types() as $post_type => $label ) : ?>
-										<label class="wpfixpath-rila-checkbox">
+										<label class="indexlane-rila-checkbox">
 											<input
 												type="checkbox"
 												name="post_types[]"
@@ -144,34 +170,34 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 										</label>
 									<?php endforeach; ?>
 									<p class="description">
-										<?php esc_html_e( 'Published posts, pages, and products are supported when the post type exists on this site.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+										<?php esc_html_e( 'Published posts, pages, and products are supported when the post type exists on this site.', 'indexlane-redirect-internal-link-auditor' ); ?>
 									</p>
 								</td>
 							</tr>
 							<tr>
 								<th scope="row">
-									<label for="wpfixpath-rila-old-domains"><?php esc_html_e( 'Old domains', 'wpfixpath-redirect-internal-link-auditor' ); ?></label>
+									<label for="indexlane-rila-old-domains"><?php esc_html_e( 'Old domains', 'indexlane-redirect-internal-link-auditor' ); ?></label>
 								</th>
 								<td>
 									<textarea
-										id="wpfixpath-rila-old-domains"
+										id="indexlane-rila-old-domains"
 										name="old_domains"
 										rows="4"
 										class="large-text code"
 										placeholder="old-example.com&#10;staging.example.com"
 									><?php echo esc_textarea( $settings['old_domains'] ); ?></textarea>
 									<p class="description">
-										<?php esc_html_e( 'Optional. Add one old or migration domain per line. Matching links are flagged even when status checks are limited to the current site.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+										<?php esc_html_e( 'Optional. Add one old or migration domain per line. Matching links are flagged even when status checks are limited to the current site.', 'indexlane-redirect-internal-link-auditor' ); ?>
 									</p>
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><?php esc_html_e( 'Scan limits', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+								<th scope="row"><?php esc_html_e( 'Scan limits', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 								<td>
-									<label for="wpfixpath-rila-max-posts">
-										<?php esc_html_e( 'Maximum content items', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+									<label for="indexlane-rila-max-posts">
+										<?php esc_html_e( 'Maximum content items', 'indexlane-redirect-internal-link-auditor' ); ?>
 										<input
-											id="wpfixpath-rila-max-posts"
+											id="indexlane-rila-max-posts"
 											type="number"
 											name="max_posts"
 											min="1"
@@ -179,10 +205,10 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 											value="<?php echo esc_attr( (string) $settings['max_posts'] ); ?>"
 										/>
 									</label>
-									<label for="wpfixpath-rila-timeout" class="wpfixpath-rila-inline-field">
-										<?php esc_html_e( 'Request timeout', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+									<label for="indexlane-rila-timeout" class="indexlane-rila-inline-field">
+										<?php esc_html_e( 'Request timeout', 'indexlane-redirect-internal-link-auditor' ); ?>
 										<input
-											id="wpfixpath-rila-timeout"
+											id="indexlane-rila-timeout"
 											type="number"
 											name="timeout"
 											min="1"
@@ -191,10 +217,10 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 											value="<?php echo esc_attr( (string) $settings['timeout'] ); ?>"
 										/>
 									</label>
-									<label for="wpfixpath-rila-max-redirects" class="wpfixpath-rila-inline-field">
-										<?php esc_html_e( 'Maximum redirects', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+									<label for="indexlane-rila-max-redirects" class="indexlane-rila-inline-field">
+										<?php esc_html_e( 'Maximum redirects', 'indexlane-redirect-internal-link-auditor' ); ?>
 										<input
-											id="wpfixpath-rila-max-redirects"
+											id="indexlane-rila-max-redirects"
 											type="number"
 											name="max_redirects"
 											min="0"
@@ -205,24 +231,24 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><?php esc_html_e( 'Status checks', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+								<th scope="row"><?php esc_html_e( 'Status checks', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 								<td>
-									<p><?php esc_html_e( 'Same-site link targets are checked. Old, staging, or development-domain links are flagged but not fetched.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
+									<p><?php esc_html_e( 'Same-site link targets are checked. Old, staging, or development-domain links are flagged but not fetched.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 								</td>
 							</tr>
 						</tbody>
 					</table>
 
 					<p class="submit">
-						<button type="submit" name="wpfixpath_rila_action" value="run" class="button button-primary">
-							<?php esc_html_e( 'Run checks', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+						<button type="submit" name="indexlane_rila_action" value="run" class="button button-primary">
+							<?php esc_html_e( 'Run checks', 'indexlane-redirect-internal-link-auditor' ); ?>
 						</button>
 					</p>
 				</form>
 
 				<div class="notice notice-info inline">
 					<p>
-						<?php esc_html_e( 'Scope: scans selected WordPress content and checks same-site link targets. Old or staging-domain links are flagged for review.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+						<?php esc_html_e( 'Scope: scans selected WordPress content and checks same-site link targets. Old or staging-domain links are flagged for review.', 'indexlane-redirect-internal-link-auditor' ); ?>
 					</p>
 				</div>
 
@@ -232,53 +258,6 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				}
 				?>
 			</div>
-			<style>
-				.wpfixpath-rila-wrap .wpfixpath-rila-checkbox {
-					display: inline-block;
-					margin-right: 18px;
-				}
-
-				.wpfixpath-rila-wrap .wpfixpath-rila-inline-field {
-					display: inline-block;
-					margin-left: 18px;
-				}
-
-				.wpfixpath-rila-wrap input[type="number"] {
-					margin-left: 6px;
-					width: 86px;
-				}
-
-				.wpfixpath-rila-results {
-					margin-top: 24px;
-				}
-
-				.wpfixpath-rila-results table {
-					table-layout: fixed;
-				}
-
-				.wpfixpath-rila-results .wpfixpath-rila-impact-table {
-					table-layout: auto;
-				}
-
-				.wpfixpath-rila-table-scroll {
-					overflow-x: auto;
-					-webkit-overflow-scrolling: touch;
-				}
-
-				.wpfixpath-rila-table-scroll .wpfixpath-rila-impact-table {
-					min-width: 1180px;
-				}
-
-				.wpfixpath-rila-table-scroll .wpfixpath-rila-occurrence-table {
-					min-width: 1380px;
-				}
-
-				.wpfixpath-rila-results td,
-				.wpfixpath-rila-results th {
-					vertical-align: top;
-					word-break: break-word;
-				}
-			</style>
 			<?php
 		}
 
@@ -291,15 +270,15 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			$stats   = $scan['stats'];
 			$results = $scan['results'];
 			?>
-			<div class="wpfixpath-rila-results">
-				<h2><?php esc_html_e( 'Results', 'wpfixpath-redirect-internal-link-auditor' ); ?></h2>
+			<div class="indexlane-rila-results">
+				<h2><?php esc_html_e( 'Results', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 
 				<p>
 					<?php
 					echo esc_html(
 						sprintf(
 							/* translators: 1: source count, 2: link count, 3: audited count, 4: skipped count, 5: HTTP request count, 6: HTTP request limit */
-							__( 'Scanned %1$d content items, found %2$d links, audited %3$d relevant links, skipped %4$d unrelated external links, and made %5$d of at most %6$d outbound HTTP requests.', 'wpfixpath-redirect-internal-link-auditor' ),
+							__( 'Scanned %1$d content items, found %2$d links, audited %3$d relevant links, skipped %4$d unrelated external links, and made %5$d of at most %6$d outbound HTTP requests.', 'indexlane-redirect-internal-link-auditor' ),
 							(int) $stats['sources_scanned'],
 							(int) $stats['links_found'],
 							(int) $stats['links_audited'],
@@ -322,7 +301,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 										'%d link occurrence could not be completely checked because the outbound-request budget was exhausted.',
 										'%d link occurrences could not be completely checked because the outbound-request budget was exhausted.',
 										(int) $stats['checks_skipped_budget'],
-										'wpfixpath-redirect-internal-link-auditor'
+										'indexlane-redirect-internal-link-auditor'
 									),
 									(int) $stats['checks_skipped_budget']
 								)
@@ -337,46 +316,46 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 						<input type="hidden" name="export_token" value="<?php echo esc_attr( $scan['export_token'] ); ?>" />
 						<p>
-							<button type="submit" name="wpfixpath_rila_action" value="export_details" class="button">
-								<?php esc_html_e( 'Export detailed rows as CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+							<button type="submit" name="indexlane_rila_action" value="export_details" class="button">
+								<?php esc_html_e( 'Export detailed rows as CSV', 'indexlane-redirect-internal-link-auditor' ); ?>
 							</button>
-							<button type="submit" name="wpfixpath_rila_action" value="export_impact" class="button">
-								<?php esc_html_e( 'Export destination impact as CSV', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+							<button type="submit" name="indexlane_rila_action" value="export_impact" class="button">
+								<?php esc_html_e( 'Export destination impact as CSV', 'indexlane-redirect-internal-link-auditor' ); ?>
 							</button>
 							<span class="description">
-								<?php esc_html_e( 'Uses this saved scan without making more HTTP requests. Saved scan data expires after one hour.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+								<?php esc_html_e( 'Uses this saved scan without making more HTTP requests. Saved scan data expires after one hour.', 'indexlane-redirect-internal-link-auditor' ); ?>
 							</span>
 						</p>
 					</form>
 				<?php else : ?>
 					<p class="description">
-						<?php esc_html_e( 'These results could not be saved temporarily, so CSV export is unavailable for this scan.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+						<?php esc_html_e( 'These results could not be saved temporarily, so CSV export is unavailable for this scan.', 'indexlane-redirect-internal-link-auditor' ); ?>
 					</p>
 				<?php endif; ?>
 
 				<?php if ( empty( $results ) ) : ?>
-					<p><?php esc_html_e( 'No internal, old-domain, or staging/development-domain content links were found in the scanned content.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
+					<p><?php esc_html_e( 'No internal, old-domain, or staging/development-domain content links were found in the scanned content.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 				<?php else : ?>
 					<?php self::render_destination_impact( self::build_destination_impact( $results ) ); ?>
 
-					<h2><?php esc_html_e( 'Link occurrences', 'wpfixpath-redirect-internal-link-auditor' ); ?></h2>
+					<h2><?php esc_html_e( 'Link occurrences', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 					<p class="description">
-						<?php esc_html_e( 'Every audited link occurrence remains available below for source-by-source cleanup.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+						<?php esc_html_e( 'Every audited link occurrence remains available below for source-by-source cleanup.', 'indexlane-redirect-internal-link-auditor' ); ?>
 					</p>
-					<div class="wpfixpath-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Link occurrences', 'wpfixpath-redirect-internal-link-auditor' ); ?>" tabindex="0">
-					<table class="widefat striped wpfixpath-rila-occurrence-table">
+					<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Link occurrences', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
+					<table class="widefat striped indexlane-rila-occurrence-table">
 						<thead>
 							<tr>
-								<th><?php esc_html_e( 'Source Post/Page', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Source Type', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Source URL', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Linked URL', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'HTTP Status', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Redirect Count', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Final URL', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Warning', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Anchor Text', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-								<th><?php esc_html_e( 'Result', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Source Post/Page', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Source Type', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Source URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'HTTP Status', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Redirect Count', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Final URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Warning', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Anchor Text', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Result', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							</tr>
 						</thead>
 						<tbody>
@@ -419,29 +398,29 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 */
 		private static function render_destination_impact( array $impact_rows ): void {
 			?>
-			<h2><?php esc_html_e( 'Destination impact', 'wpfixpath-redirect-internal-link-auditor' ); ?></h2>
+			<h2><?php esc_html_e( 'Destination impact', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 			<p class="description">
-				<?php esc_html_e( 'Broken/error and redirected targets are grouped by normalized destination. Repeated links in one content item increase occurrences but count as one affected content item.', 'wpfixpath-redirect-internal-link-auditor' ); ?>
+				<?php esc_html_e( 'Broken/error and redirected targets are grouped by normalized destination. Repeated links in one content item increase occurrences but count as one affected content item.', 'indexlane-redirect-internal-link-auditor' ); ?>
 			</p>
 
 			<?php if ( empty( $impact_rows ) ) : ?>
-				<p><?php esc_html_e( 'No broken/error or redirected destinations were found.', 'wpfixpath-redirect-internal-link-auditor' ); ?></p>
+				<p><?php esc_html_e( 'No broken/error or redirected destinations were found.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 				<?php return; ?>
 			<?php endif; ?>
 
-			<div class="wpfixpath-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Destination impact', 'wpfixpath-redirect-internal-link-auditor' ); ?>" tabindex="0">
-			<table class="widefat striped wpfixpath-rila-impact-table">
+			<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Destination impact', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
+			<table class="widefat striped indexlane-rila-impact-table">
 				<thead>
 					<tr>
-						<th><?php esc_html_e( 'Destination', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'Impact', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'Occurrences', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'Affected Content Items', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'Result', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'HTTP Status Evidence', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'Maximum Observed Redirects', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'Observed Final URLs', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
-						<th><?php esc_html_e( 'Warning Evidence', 'wpfixpath-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Destination', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Impact', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Occurrences', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Affected Content Items', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Result', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'HTTP Status Evidence', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Maximum Observed Redirects', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Observed Final URLs', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<th><?php esc_html_e( 'Warning Evidence', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 					</tr>
 				</thead>
 				<tbody>
@@ -746,7 +725,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					'Invalid URL',
-					__( 'Error', 'wpfixpath-redirect-internal-link-auditor' )
+					__( 'Error', 'indexlane-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -761,16 +740,16 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 
 			$warnings = array();
 			if ( $is_old ) {
-				$warnings[] = __( 'Old domain', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Old domain', 'indexlane-redirect-internal-link-auditor' );
 			}
 			if ( $is_staging ) {
-				$warnings[] = __( 'Staging/dev domain', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Staging/dev domain', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			$should_request = $is_current;
 
 			if ( ! $should_request ) {
-				$warnings[] = __( 'Status check skipped by same-site scope', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Status check skipped by same-site scope', 'indexlane-redirect-internal-link-auditor' );
 
 				return self::build_result_row(
 					$source,
@@ -780,12 +759,12 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					implode( '; ', $warnings ),
-					__( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' )
+					__( 'Needs review', 'indexlane-redirect-internal-link-auditor' )
 				);
 			}
 
 			if ( ! self::is_valid_http_url( $linked_url ) ) {
-				$warnings[] = __( 'Invalid HTTP URL', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Invalid HTTP URL', 'indexlane-redirect-internal-link-auditor' );
 
 				return self::build_result_row(
 					$source,
@@ -795,7 +774,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					implode( '; ', $warnings ),
-					__( 'Error', 'wpfixpath-redirect-internal-link-auditor' )
+					__( 'Error', 'indexlane-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -807,7 +786,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				$budget_skips++;
 				$warnings[] = sprintf(
 					/* translators: %d: maximum number of outbound HTTP requests per run */
-					__( 'Status check skipped after the %d-request budget was exhausted', 'wpfixpath-redirect-internal-link-auditor' ),
+					__( 'Status check skipped after the %d-request budget was exhausted', 'indexlane-redirect-internal-link-auditor' ),
 					self::MAX_HTTP_REQUESTS
 				);
 
@@ -819,7 +798,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'',
 					'',
 					self::format_warning_text( $warnings ),
-					__( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' )
+					__( 'Needs review', 'indexlane-redirect-internal-link-auditor' )
 				);
 			} else {
 				$check = self::check_url( $linked_url, (float) $settings['timeout'], (int) $settings['max_redirects'], $request_count );
@@ -840,7 +819,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					$check['redirect_count'],
 					$check['final_url'],
 					self::format_warning_text( $warnings ),
-					__( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' )
+					__( 'Needs review', 'indexlane-redirect-internal-link-auditor' )
 				);
 			}
 
@@ -857,58 +836,58 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					$check['redirect_count'],
 					$check['final_url'],
 					self::format_warning_text( $warnings ),
-					__( 'Error', 'wpfixpath-redirect-internal-link-auditor' )
+					__( 'Error', 'indexlane-redirect-internal-link-auditor' )
 				);
 			}
 
 			$redirect_codes = $check['redirect_codes'];
 			if ( count( $redirect_codes ) > 1 ) {
-				$warnings[] = __( 'Redirect chain', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Redirect chain', 'indexlane-redirect-internal-link-auditor' );
 			} elseif ( 1 === count( $redirect_codes ) ) {
 				$warnings[] = sprintf(
 					/* translators: %d: HTTP redirect status code */
-					__( 'Redirect (%d)', 'wpfixpath-redirect-internal-link-auditor' ),
+					__( 'Redirect (%d)', 'indexlane-redirect-internal-link-auditor' ),
 					(int) $redirect_codes[0]
 				);
 			}
 
 			if ( ! empty( $check['redirect_limit_reached'] ) ) {
-				$warnings[] = __( 'Redirect limit reached', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Redirect limit reached', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			if ( ! empty( $check['redirect_loop'] ) ) {
-				$warnings[] = __( 'Redirect loop', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Redirect loop', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			if ( ! empty( $check['redirect_left_site'] ) ) {
-				$warnings[] = __( 'Redirect leaves site; external target was not fetched.', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'Redirect leaves site; external target was not fetched.', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			$final_status = (int) $check['final_status'];
 			if ( $final_status <= 0 ) {
-				$warnings[] = __( 'No HTTP status returned', 'wpfixpath-redirect-internal-link-auditor' );
+				$warnings[] = __( 'No HTTP status returned', 'indexlane-redirect-internal-link-auditor' );
 			} elseif ( in_array( $final_status, array( 404, 410 ), true ) ) {
 				$warnings[] = sprintf(
 					/* translators: %d: HTTP status code */
-					__( 'Broken link (%d)', 'wpfixpath-redirect-internal-link-auditor' ),
+					__( 'Broken link (%d)', 'indexlane-redirect-internal-link-auditor' ),
 					$final_status
 				);
 			} elseif ( in_array( $final_status, array( 401, 403, 429 ), true ) ) {
 				$warnings[] = sprintf(
 					/* translators: %d: HTTP status code */
-					__( 'Blocked or rate limited (%d)', 'wpfixpath-redirect-internal-link-auditor' ),
+					__( 'Blocked or rate limited (%d)', 'indexlane-redirect-internal-link-auditor' ),
 					$final_status
 				);
 			} elseif ( $final_status >= 400 ) {
 				$warnings[] = sprintf(
 					/* translators: %d: HTTP status code */
-					__( 'HTTP error (%d)', 'wpfixpath-redirect-internal-link-auditor' ),
+					__( 'HTTP error (%d)', 'indexlane-redirect-internal-link-auditor' ),
 					$final_status
 				);
 			} elseif ( $final_status >= 300 && $final_status < 400 ) {
 				$warnings[] = sprintf(
 					/* translators: %d: HTTP status code */
-					__( 'Redirect without final target (%d)', 'wpfixpath-redirect-internal-link-auditor' ),
+					__( 'Redirect without final target (%d)', 'indexlane-redirect-internal-link-auditor' ),
 					$final_status
 				);
 			}
@@ -961,7 +940,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 						'ok'                     => false,
 						'error'                  => sprintf(
 							/* translators: %d: maximum number of outbound HTTP requests per run */
-							__( 'Status check incomplete because the %d-request budget was exhausted', 'wpfixpath-redirect-internal-link-auditor' ),
+							__( 'Status check incomplete because the %d-request budget was exhausted', 'indexlane-redirect-internal-link-auditor' ),
 							self::MAX_HTTP_REQUESTS
 						),
 						'statuses'               => $statuses,
@@ -1049,7 +1028,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				if ( ! self::is_valid_http_url( $next_url ) ) {
 					return array(
 						'ok'                     => false,
-						'error'                  => __( 'Invalid redirect target', 'wpfixpath-redirect-internal-link-auditor' ),
+						'error'                  => __( 'Invalid redirect target', 'indexlane-redirect-internal-link-auditor' ),
 						'statuses'               => $statuses,
 						'redirect_count'         => $redirect_count,
 						'redirect_codes'         => $redirect_codes,
@@ -1111,7 +1090,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				'redirection'         => 0,
 				'reject_unsafe_urls'  => true,
 				'limit_response_size' => self::RESPONSE_SIZE_LIMIT,
-				'user-agent'          => 'WPFixPath Redirect & Internal Link Auditor/' . self::VERSION . '; ' . home_url( '/' ),
+				'user-agent'          => 'IndexLane Redirect & Internal Link Auditor/' . self::VERSION . '; ' . home_url( '/' ),
 			);
 
 			return wp_safe_remote_get( $url, $args );
@@ -1157,30 +1136,30 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		 */
 		private static function result_label_for_check( array $warnings, int $final_status, int $redirect_count, bool $is_old, bool $is_staging ): string {
 			if ( $final_status <= 0 ) {
-				return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
+				return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			if ( in_array( $final_status, array( 401, 403, 429 ), true ) ) {
-				return __( 'Blocked', 'wpfixpath-redirect-internal-link-auditor' );
+				return __( 'Blocked', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			if ( in_array( $final_status, array( 404, 410 ), true ) || $final_status >= 500 ) {
-				return __( 'Error', 'wpfixpath-redirect-internal-link-auditor' );
+				return __( 'Error', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			if ( $final_status >= 400 ) {
-				return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
+				return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			if ( $redirect_count > 0 ) {
-				return __( 'Warning', 'wpfixpath-redirect-internal-link-auditor' );
+				return __( 'Warning', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			if ( $is_old || $is_staging || ! empty( $warnings ) ) {
-				return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
+				return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
 			}
 
-			return __( 'OK', 'wpfixpath-redirect-internal-link-auditor' );
+			return __( 'OK', 'indexlane-redirect-internal-link-auditor' );
 		}
 
 		/**
@@ -1191,7 +1170,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		private static function format_warning_text( array $warnings ): string {
 			$warnings = array_filter( array_map( 'trim', $warnings ) );
 
-			return empty( $warnings ) ? __( 'None', 'wpfixpath-redirect-internal-link-auditor' ) : implode( '; ', array_unique( $warnings ) );
+			return empty( $warnings ) ? __( 'None', 'indexlane-redirect-internal-link-auditor' ) : implode( '; ', array_unique( $warnings ) );
 		}
 
 		/**
@@ -1297,11 +1276,11 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 				sort( $warnings, SORT_STRING );
 
 				if ( $group['has_broken'] && $group['has_redirect'] ) {
-					$impact = __( 'Broken/error after redirect', 'wpfixpath-redirect-internal-link-auditor' );
+					$impact = __( 'Broken/error after redirect', 'indexlane-redirect-internal-link-auditor' );
 				} elseif ( $group['has_broken'] ) {
-					$impact = __( 'Broken/error', 'wpfixpath-redirect-internal-link-auditor' );
+					$impact = __( 'Broken/error', 'indexlane-redirect-internal-link-auditor' );
 				} else {
-					$impact = __( 'Redirect', 'wpfixpath-redirect-internal-link-auditor' );
+					$impact = __( 'Redirect', 'indexlane-redirect-internal-link-auditor' );
 				}
 
 				$impact_rows[] = array(
@@ -1309,7 +1288,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 					'impact'                => $impact,
 					'occurrences'           => $group['occurrences'],
 					'affected_sources'      => count( $group['source_keys'] ),
-					'result'                => '' !== $group['result'] ? $group['result'] : __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' ),
+					'result'                => '' !== $group['result'] ? $group['result'] : __( 'Needs review', 'indexlane-redirect-internal-link-auditor' ),
 					'result_rank'           => $group['result_rank'],
 					'http_status_evidence'  => implode( ' | ', $http_statuses ),
 					'max_redirect_count'    => $group['max_redirect_count'],
@@ -1423,17 +1402,17 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		private static function translated_result_label( string $english_label ): string {
 			switch ( $english_label ) {
 				case 'Error':
-					return __( 'Error', 'wpfixpath-redirect-internal-link-auditor' );
+					return __( 'Error', 'indexlane-redirect-internal-link-auditor' );
 				case 'Blocked':
-					return __( 'Blocked', 'wpfixpath-redirect-internal-link-auditor' );
+					return __( 'Blocked', 'indexlane-redirect-internal-link-auditor' );
 				case 'Needs review':
-					return __( 'Needs review', 'wpfixpath-redirect-internal-link-auditor' );
+					return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
 				case 'Warning':
-					return __( 'Warning', 'wpfixpath-redirect-internal-link-auditor' );
+					return __( 'Warning', 'indexlane-redirect-internal-link-auditor' );
 				case 'OK':
-					return __( 'OK', 'wpfixpath-redirect-internal-link-auditor' );
+					return __( 'OK', 'indexlane-redirect-internal-link-auditor' );
 				case 'None':
-					return __( 'None', 'wpfixpath-redirect-internal-link-auditor' );
+					return __( 'None', 'indexlane-redirect-internal-link-auditor' );
 				default:
 					return $english_label;
 			}
@@ -1449,7 +1428,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			nocache_headers();
 			header( 'Content-Type: text/csv; charset=utf-8' );
 			$report_type = 'impact' === $report_type ? 'impact' : 'details';
-			header( 'Content-Disposition: attachment; filename=wpfixpath-redirect-internal-link-auditor-' . $report_type . '-' . gmdate( 'Y-m-d-His' ) . '.csv' );
+			header( 'Content-Disposition: attachment; filename=indexlane-redirect-internal-link-auditor-' . $report_type . '-' . gmdate( 'Y-m-d-His' ) . '.csv' );
 
 			$output = fopen( 'php://output', 'w' );
 			if ( false === $output ) {
@@ -1836,7 +1815,7 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 			$text = trim( preg_replace( '/\s+/', ' ', wp_strip_all_tags( $text ) ) );
 
 			if ( '' === $text ) {
-				return __( '(empty anchor)', 'wpfixpath-redirect-internal-link-auditor' );
+				return __( '(empty anchor)', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			return $text;
@@ -1861,5 +1840,5 @@ if ( ! class_exists( 'WPFixPath_Redirect_Internal_Link_Auditor' ) ) {
 		}
 	}
 
-	WPFixPath_Redirect_Internal_Link_Auditor::init();
+	IndexLane_Redirect_Internal_Link_Auditor::init();
 }
