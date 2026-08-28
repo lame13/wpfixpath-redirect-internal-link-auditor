@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.3.0
+
+- Replaced the bounded synchronous form request with authenticated, browser-driven WordPress AJAX batches.
+- Added resumable per-administrator scan sessions for all published content or a numeric newest-content limit.
+- Added selection for every registered public post type.
+- Added live progress for content processed, links extracted, unique destinations checked, HTTP requests, and actionable issues.
+- Added pause, continue, cancel, reload recovery, and explicit 250-request allowance extensions.
+- Limited each AJAX batch to five content items and five actual outbound HTTP requests while allowing redirect chains to continue safely across batches.
+- Deduplicated destination requests across the complete session without collapsing occurrence-level evidence.
+- Limited CSV export to exact completed-session evidence and extended temporary per-user session retention to 24 hours of inactivity.
+- Added automatic abandoned-session expiry without cron jobs, custom tables, telemetry, or content changes.
+- Made all plugin-owned administrator, JavaScript, result, warning, and CSV strings translation-ready with literal gettext calls, translator notes, and the WordPress.org slug text domain.
+- Added repeatable source auditing and local POT extraction verification without bundling translations.
+- Added WordPress-loaded integration tests and authenticated AJAX end-to-end coverage.
+
 ## 0.2.2
 
 - Moved the admin page CSS into a stylesheet enqueued only on the plugin's Tools screen.

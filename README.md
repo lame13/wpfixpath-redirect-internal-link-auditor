@@ -1,65 +1,56 @@
 # IndexLane Redirect & Internal Link Auditor
 
-Find broken, redirected, old-domain, and staging-domain links inside WordPress post, page, and product content.
+Find broken, redirected, old-domain, and staging-domain links in the stored content of any public WordPress post type.
 
-The plugin runs in wp-admin and builds two cleanup views:
+Version 0.3 runs complete, resumable scan sessions from wp-admin. It produces a destination-impact view and exact occurrence evidence without editing content, following external redirect targets, or calling an IndexLane service.
 
-- a destination-impact table that groups broken/error and redirected targets by affected content and occurrence count
-- the complete occurrence table with source page, linked URL, HTTP status, redirect count, final URL, warning, anchor text, and result label
+Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://indexlane.dev/plugins/redirect-internal-link-auditor)
 
-Useful after migrations, redesigns, domain changes, or old cleanup work where internal links quietly drift.
+## Complete scan sessions
+
+- Choose all published content or a numeric limit of the newest content.
+- Select any registered public post type.
+- Process work through authenticated WordPress AJAX in small browser-driven batches.
+- See content processed, links extracted, unique destinations checked, actual HTTP requests, and actionable issue occurrences.
+- Pause, continue, cancel, or reload and resume one per-administrator session.
+- Deduplicate requests for the same destination across the entire session while retaining every source occurrence.
+- Stop at an explicit 250-request session allowance and continue with another 250 requests when needed.
+- Export destination-impact and detailed-row CSVs only from exact completed-session evidence.
+
+Each AJAX batch processes at most five content items and makes at most five actual outbound HTTP requests. Redirect chains persist between batches, so an allowance boundary never turns partial redirect evidence into a result row.
 
 ## What it checks
 
-- internal links found in post, page, and WooCommerce product content
+- same-site links found in selected posts' `post_content`
 - 404 and 410 targets
-- 301 / 302 redirects
-- redirect chains
-- links pointing to old domains you enter
+- 301, 302, 303, 307, and 308 redirects
+- redirect chains, loops, and configured redirect limits
+- same-site redirects that leave the site, without fetching the external target
+- links pointing to old domains entered by the administrator
 - common staging or development-domain links
-- source page and anchor text
-- destination-level impact across repeated links
-- separate destination-impact and detailed-row CSV exports
+- occurrence source, edit URL, anchor text, status chain, redirect count, final URL, warning, and result
+
+Unrelated external links are skipped. Old, staging, and development-domain links are reported but never fetched.
 
 ## Destination impact
 
-Version 0.2 adds one row per actionable destination before the full occurrence table. It groups completed result rows only; it does not recrawl or make additional requests.
+One row is derived for each broken/error or redirected destination. The view includes occurrences, distinct affected content items, result severity, HTTP status evidence, maximum redirect count, observed final URLs, and warning evidence. It never makes additional requests.
 
-The view includes:
-
-- normalized destination URL
-- broken/error, redirect, or combined impact
-- total link occurrences
-- distinct affected content items
-- most severe result label
-- observed HTTP status evidence
-- maximum redirect count
-- effective/final URL evidence
-- warning evidence
-
-Two links to the same destination in one page count as two occurrences and one affected content item. The same destination linked from a second page counts as another occurrence and a second affected content item.
-
-Grouping normalizes scheme and host case, removes fragments, and removes default ports. Scheme, path, query string, non-default port, and trailing slash remain distinct because they can produce different HTTP behavior.
-
-Rows are ordered deterministically by result severity, affected content count, occurrence count, and destination URL.
+Destination grouping normalizes scheme and host case, fragments, and default ports. Paths, query strings, schemes, non-default ports, and trailing slashes remain distinct because they can return different evidence.
 
 ## Data handling
 
-Checks run on demand inside wp-admin. Results are shown for the current run and can be exported as CSV without repeating the scan.
+One active or completed scan session per administrator is stored in a WordPress transient. Its sliding expiry is 24 hours, so abandoned sessions are cleaned up automatically by WordPress and completed evidence remains available briefly for export.
 
-Completed results are cached in a per-user WordPress transient for up to one hour so both exports contain the exact evidence shown on screen. Destination impact is derived from those saved rows. The plugin does not create custom database tables.
+The plugin creates no custom table, cron job, account, telemetry, frontend tracking, or content mutation.
 
-The plugin does not create an account, call an IndexLane service, or add frontend tracking.
+All plugin-owned administrator, status, warning, result, JavaScript, and CSV-header strings use the `indexlane-redirect-internal-link-auditor` text domain. WordPress.org language packs can translate the plugin without bundled `.po` or `.mo` files.
 
 ## Limits
 
-This is a content-link checker, not a crawler.
+This is a stored-content link checker, not a rendered-site crawler. It does not inspect menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
 
-Version 0.2 scans links found in WordPress post, page, and product content. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
-
-It is read-only. It does not replace links, bulk edit content, schedule scans, create database tables, or add frontend badges.
-
-Each run makes at most 250 outbound HTTP requests. Redirect hops each consume one request, and links that cannot be completed inside that budget are explicitly marked for review.
+HTTP checks use bounded GET response bodies, administrator-selected timeouts and redirect limits, WordPress unsafe-URL rejection, and manual same-site redirect handling.
 
 ## CSV exports
 
@@ -102,23 +93,15 @@ Labels are intentionally conservative. The plugin reports link evidence; it does
 
 ## Development
 
-Run a syntax check before packaging:
+Run the fast syntax and behavioral checks:
 
 ```bash
 php -l indexlane-redirect-internal-link-auditor.php
+php tests/behavioral.php
+WP_CLI_BIN=/path/to/wp ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-link-auditor.pot
 ```
 
-For a manual WordPress check, copy or symlink this folder into:
-
-```text
-wp-content/plugins/
-```
-
-Then activate the plugin and open:
-
-```text
-Tools -> Redirect & Internal Link Auditor
-```
+The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded integration suite, and exercises the authenticated AJAX lifecycle and both CSV downloads over HTTP.
 
 Build the production ZIP for WordPress.org submission:
 

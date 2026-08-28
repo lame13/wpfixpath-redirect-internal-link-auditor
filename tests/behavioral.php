@@ -18,6 +18,8 @@ $GLOBALS['indexlane_test_translations'] = array();
 $GLOBALS['indexlane_test_actions']      = array();
 $GLOBALS['indexlane_test_admin_pages']  = array();
 $GLOBALS['indexlane_test_styles']       = array();
+$GLOBALS['indexlane_test_scripts']      = array();
+$GLOBALS['indexlane_test_localizations'] = array();
 
 class WP_Error {
 	/** @var string */
@@ -56,6 +58,29 @@ function wp_enqueue_style( string $handle, string $src, array $dependencies = ar
 		'dependencies' => $dependencies,
 		'version'      => $version,
 	);
+}
+function wp_enqueue_script( string $handle, string $src, array $dependencies = array(), string $version = '', bool $in_footer = false ): void {
+	$GLOBALS['indexlane_test_scripts'][] = array(
+		'handle'       => $handle,
+		'src'          => $src,
+		'dependencies' => $dependencies,
+		'version'      => $version,
+		'in_footer'    => $in_footer,
+	);
+}
+function wp_localize_script( string $handle, string $object_name, array $data ): bool {
+	$GLOBALS['indexlane_test_localizations'][] = array(
+		'handle'      => $handle,
+		'object_name' => $object_name,
+		'data'        => $data,
+	);
+	return true;
+}
+function wp_create_nonce( string $action ): string {
+	return 'test-nonce-for-' . $action;
+}
+function admin_url( string $path = '' ): string {
+	return 'https://example.test/wp-admin/' . ltrim( $path, '/' );
 }
 function plugin_basename( string $file ): string {
 	return basename( $file );
@@ -114,6 +139,13 @@ function get_transient( string $key ) {
 		? $GLOBALS['indexlane_test_transients'][ $key ]['value']
 		: false;
 }
+function delete_transient( string $key ): bool {
+	if ( ! isset( $GLOBALS['indexlane_test_transients'][ $key ] ) ) {
+		return false;
+	}
+	unset( $GLOBALS['indexlane_test_transients'][ $key ] );
+	return true;
+}
 
 require dirname( __DIR__ ) . '/indexlane-redirect-internal-link-auditor.php';
 
@@ -149,6 +181,9 @@ function indexlane_response( int $status, string $location = '' ): array {
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['admin_menu'] ), 'The Tools page must be registered on admin_menu.' );
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['admin_enqueue_scripts'] ), 'Admin styles must use admin_enqueue_scripts.' );
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['admin_init'] ), 'CSV exports must remain registered on admin_init.' );
+indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['wp_ajax_indexlane_rila_start_scan'] ), 'Starting a scan must use authenticated WordPress AJAX.' );
+indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['wp_ajax_indexlane_rila_run_batch'] ), 'Scan batches must use authenticated WordPress AJAX.' );
+indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['wp_ajax_indexlane_rila_control_scan'] ), 'Scan controls must use authenticated WordPress AJAX.' );
 
 indexlane_invoke( 'register_admin_page' );
 indexlane_assert_same(
@@ -157,22 +192,37 @@ indexlane_assert_same(
 	'The Tools page must retain the submitted plugin slug.'
 );
 
-indexlane_invoke( 'enqueue_admin_styles', array( 'dashboard' ) );
+indexlane_invoke( 'enqueue_admin_assets', array( 'dashboard' ) );
 indexlane_assert_same( array(), $GLOBALS['indexlane_test_styles'], 'The plugin stylesheet must not load on unrelated admin pages.' );
+indexlane_assert_same( array(), $GLOBALS['indexlane_test_scripts'], 'The plugin browser controller must not load on unrelated admin pages.' );
 
-indexlane_invoke( 'enqueue_admin_styles', array( 'tools_page_indexlane-redirect-internal-link-auditor' ) );
+indexlane_invoke( 'enqueue_admin_assets', array( 'tools_page_indexlane-redirect-internal-link-auditor' ) );
 indexlane_assert_same(
 	array(
 		array(
 			'handle'       => 'indexlane-rila-admin',
 			'src'          => 'https://example.test/wp-content/plugins/indexlane-redirect-internal-link-auditor/assets/admin.css',
 			'dependencies' => array(),
-			'version'      => '0.2.2',
+			'version'      => '0.3.0',
 		),
 	),
 	$GLOBALS['indexlane_test_styles'],
 	'The plugin stylesheet must load with the release version only on its Tools page.'
 );
+indexlane_assert_same(
+	array(
+		array(
+			'handle'       => 'indexlane-rila-admin',
+			'src'          => 'https://example.test/wp-content/plugins/indexlane-redirect-internal-link-auditor/assets/admin.js',
+			'dependencies' => array(),
+			'version'      => '0.3.0',
+			'in_footer'    => true,
+		),
+	),
+	$GLOBALS['indexlane_test_scripts'],
+	'The authenticated batch controller must load with the release version only on its Tools page.'
+);
+indexlane_assert_same( 'IndexLaneRila', $GLOBALS['indexlane_test_localizations'][0]['object_name'], 'The browser controller must receive its nonce and persisted session summary.' );
 
 /**
  * Build one complete stored result row for report tests.
@@ -451,15 +501,87 @@ indexlane_assert_same( true, $budget_check['budget_exhausted'], 'A redirect chai
 indexlane_assert_same( 250, $request_count, 'The actual request count must never exceed the hard limit.' );
 indexlane_assert_same( 1, count( $GLOBALS['indexlane_test_http_calls'] ), 'No HTTP call may occur after request 250.' );
 
-$results = array( array( 'linked_url' => 'https://example.test/foo/' ) );
-$token   = indexlane_invoke( 'store_export_results', array( $results ) );
-$loaded  = indexlane_invoke( 'get_export_results', array( $token ) );
-indexlane_assert_same( $results, $loaded, 'CSV export should load the exact saved result set.' );
+$GLOBALS['indexlane_test_http_calls'] = array();
+$GLOBALS['indexlane_test_responses']  = array();
+$pending_checks = array();
+$occurrence     = array(
+	'source'     => array(
+		'id'       => 1,
+		'title'    => 'Batch source',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/source',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=1&action=edit',
+	),
+	'link'       => array( 'href' => '/target', 'anchor' => 'Target' ),
+	'linked_url' => 'https://example.test/target',
+	'warnings'   => array(),
+	'is_old'     => false,
+	'is_staging' => false,
+);
+
+for ( $i = 1; $i <= 6; $i++ ) {
+	$url = 'https://example.test/batch-' . $i;
+	$GLOBALS['indexlane_test_responses'][ $url ] = indexlane_response( 200 );
+	$pending_checks[ 'batch-' . $i ] = array(
+		'url'         => $url,
+		'occurrences' => 1 === $i ? array( $occurrence, $occurrence ) : array( $occurrence ),
+		'check_state' => indexlane_invoke( 'initial_check_state', array( $url ) ),
+	);
+}
+
+$batch_session = array(
+	'schema_version'   => 1,
+	'id'               => '12345678-1234-4abc-8def-000000000010',
+	'status'           => 'running',
+	'created_at'       => time(),
+	'updated_at'       => time(),
+	'expires_at'       => time() + 86400,
+	'settings'         => array( 'timeout' => 2.0, 'max_redirects' => 5 ),
+	'total_items'      => 1,
+	'content_done'     => true,
+	'request_limit'    => 250,
+	'stats'            => indexlane_invoke( 'empty_stats' ),
+	'results'          => array(),
+	'checked_urls'     => array(),
+	'pending_checks'   => $pending_checks,
+);
+$batch_session['stats']['content_items_processed'] = 1;
+$first_batch = indexlane_invoke( 'process_scan_batch', array( $batch_session ) );
+indexlane_assert_same( 5, $first_batch['stats']['http_requests'], 'One AJAX batch must make no more than five outbound requests.' );
+indexlane_assert_same( 5, $first_batch['stats']['unique_destinations_checked'], 'The batch must count completed unique destinations, not occurrences.' );
+indexlane_assert_same( 6, count( $first_batch['results'] ), 'Duplicate occurrences must share one request while retaining exact occurrence evidence.' );
+indexlane_assert_same( 'running', $first_batch['status'], 'A bounded batch must remain resumable while queued work remains.' );
+$second_batch = indexlane_invoke( 'process_scan_batch', array( $first_batch ) );
+indexlane_assert_same( 6, $second_batch['stats']['http_requests'], 'A later batch must continue from the saved request count.' );
+indexlane_assert_same( 6, $second_batch['stats']['unique_destinations_checked'], 'Request deduplication must span the entire session.' );
+indexlane_assert_same( 7, count( $second_batch['results'] ), 'Every accumulated occurrence must remain in completed evidence.' );
+indexlane_assert_same( 'complete', $second_batch['status'], 'The session completes only after content and queued destinations are finished.' );
+
+$limit_session                         = $batch_session;
+$limit_session['stats']['http_requests'] = 250;
+$limit_session['request_limit']          = 250;
+$GLOBALS['indexlane_test_http_calls']    = array();
+$limit_session = indexlane_invoke( 'process_scan_batch', array( $limit_session ) );
+indexlane_assert_same( 'limit_reached', $limit_session['status'], 'A session must pause at its explicit total request allowance.' );
+indexlane_assert_same( 0, count( $GLOBALS['indexlane_test_http_calls'] ), 'No request may be made beyond the current session allowance.' );
+indexlane_assert_same( 0, count( $limit_session['results'] ), 'Allowance exhaustion must not create incomplete evidence rows.' );
+
+$saved_session = $second_batch;
+indexlane_assert_same( true, indexlane_invoke( 'save_scan_session', array( $saved_session ) ), 'Session progress must be stored in the current user transient.' );
+$loaded_session = indexlane_invoke( 'get_scan_session' );
+indexlane_assert_same( $saved_session['results'], $loaded_session['results'], 'CSV export must read the exact accumulated session evidence.' );
 $saved_transient = reset( $GLOBALS['indexlane_test_transients'] );
-indexlane_assert_same( 3600, $saved_transient['expiration'], 'Saved export results should expire after one hour.' );
+indexlane_assert_same( 86400, $saved_transient['expiration'], 'Abandoned and completed sessions should expire automatically after 24 hours.' );
 
 $GLOBALS['indexlane_test_user_id'] = 8;
-$other_user_results = indexlane_invoke( 'get_export_results', array( $token ) );
-indexlane_assert_same( null, $other_user_results, 'Saved export results must be scoped to the administrator who ran the scan.' );
+$other_user_session = indexlane_invoke( 'get_scan_session' );
+indexlane_assert_same( null, $other_user_session, 'Saved scan sessions must be scoped to the administrator who started them.' );
+
+$GLOBALS['indexlane_test_user_id'] = 7;
+$session_key = 'indexlane_rila_session_7';
+$GLOBALS['indexlane_test_transients'][ $session_key ]['value']['expires_at'] = time() - 1;
+$expired_session = indexlane_invoke( 'get_scan_session' );
+indexlane_assert_same( null, $expired_session, 'Explicitly expired abandoned sessions must be rejected.' );
+indexlane_assert_same( false, isset( $GLOBALS['indexlane_test_transients'][ $session_key ] ), 'Expired abandoned sessions must be cleaned up on access.' );
 
 fwrite( STDOUT, "All behavioral tests passed.\n" );

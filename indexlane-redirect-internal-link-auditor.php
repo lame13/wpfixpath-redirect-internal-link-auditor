@@ -1,9 +1,9 @@
 <?php
 /**
  * Plugin Name: IndexLane Redirect & Internal Link Auditor
- * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor/
+ * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
  * Description: Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
- * Version: 0.2.2
+ * Version: 0.3.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -24,15 +24,20 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
 	final class IndexLane_Redirect_Internal_Link_Auditor {
-		private const VERSION                  = '0.2.2';
-		private const SLUG                     = 'indexlane-redirect-internal-link-auditor';
-		private const CAPABILITY               = 'manage_options';
-		private const NONCE_ACTION             = 'indexlane_rila_run_scan';
-		private const NONCE_NAME               = 'indexlane_rila_nonce';
-		private const MAX_HTTP_REQUESTS         = 250;
-		private const RESPONSE_SIZE_LIMIT       = 4096;
-		private const EXPORT_TRANSIENT_PREFIX   = 'indexlane_rila_export_';
-		private const EXPORT_TRANSIENT_LIFETIME = 3600;
+		private const VERSION                         = '0.3.0';
+		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
+		private const CAPABILITY                      = 'manage_options';
+		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';
+		private const NONCE_NAME                      = 'indexlane_rila_nonce';
+		private const SESSION_SCHEMA_VERSION          = 1;
+		private const SESSION_TRANSIENT_PREFIX        = 'indexlane_rila_session_';
+		private const SESSION_LIFETIME                = 86400;
+		private const INITIAL_REQUEST_ALLOWANCE       = 250;
+		private const REQUEST_ALLOWANCE_INCREMENT     = 250;
+		private const MAX_HTTP_REQUESTS_PER_BATCH     = 5;
+		private const MAX_CONTENT_ITEMS_PER_BATCH     = 5;
+		private const MAX_NUMERIC_CONTENT_ITEMS       = 10000;
+		private const RESPONSE_SIZE_LIMIT              = 4096;
 
 		/**
 		 * Hook suffix for the plugin's Tools screen.
@@ -46,8 +51,11 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		 */
 		public static function init(): void {
 			add_action( 'admin_menu', array( __CLASS__, 'register_admin_page' ) );
-			add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_admin_styles' ) );
+			add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_admin_assets' ) );
 			add_action( 'admin_init', array( __CLASS__, 'maybe_export_csv' ) );
+			add_action( 'wp_ajax_indexlane_rila_start_scan', array( __CLASS__, 'ajax_start_scan' ) );
+			add_action( 'wp_ajax_indexlane_rila_run_batch', array( __CLASS__, 'ajax_run_batch' ) );
+			add_action( 'wp_ajax_indexlane_rila_control_scan', array( __CLASS__, 'ajax_control_scan' ) );
 		}
 
 		/**
@@ -68,7 +76,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		/**
 		 * Enqueue styles only on the plugin's Tools screen.
 		 */
-		public static function enqueue_admin_styles( string $hook_suffix ): void {
+		public static function enqueue_admin_assets( string $hook_suffix ): void {
 			if ( '' === self::$admin_page_hook || self::$admin_page_hook !== $hook_suffix ) {
 				return;
 			}
@@ -78,6 +86,31 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				plugins_url( 'assets/admin.css', __FILE__ ),
 				array(),
 				self::VERSION
+			);
+
+			wp_enqueue_script(
+				'indexlane-rila-admin',
+				plugins_url( 'assets/admin.js', __FILE__ ),
+				array(),
+				self::VERSION,
+				true
+			);
+
+			wp_localize_script(
+				'indexlane-rila-admin',
+				'IndexLaneRila',
+				array(
+					'ajaxUrl'        => admin_url( 'admin-ajax.php' ),
+					'nonce'          => wp_create_nonce( self::NONCE_ACTION ),
+					'initialSession' => self::get_scan_session_summary(),
+					'strings'        => array(
+						'networkError' => __( 'The scan request failed. Check your connection, then continue the scan.', 'indexlane-redirect-internal-link-auditor' ),
+						'pausing'      => __( 'Pausing after the current batch…', 'indexlane-redirect-internal-link-auditor' ),
+						'canceling'    => __( 'Canceling after the current batch…', 'indexlane-redirect-internal-link-auditor' ),
+						'interrupted'  => __( 'Scan connection interrupted', 'indexlane-redirect-internal-link-auditor' ),
+						'confirmCancel' => __( 'Cancel this scan? Its accumulated temporary evidence will be removed.', 'indexlane-redirect-internal-link-auditor' ),
+					),
+				)
 			);
 		}
 
@@ -99,23 +132,181 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			}
 
 			$action = isset( $_POST['indexlane_rila_action'] ) ? sanitize_key( wp_unslash( $_POST['indexlane_rila_action'] ) ) : '';
-			if ( ! in_array( $action, array( 'export', 'export_details', 'export_impact' ), true ) ) {
+			if ( ! in_array( $action, array( 'export_details', 'export_impact' ), true ) ) {
 				return;
 			}
 
 			check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
 
-			$export_token = isset( $_POST['export_token'] ) && is_scalar( $_POST['export_token'] )
-				? sanitize_text_field( wp_unslash( (string) $_POST['export_token'] ) )
+			$session_id = isset( $_POST['session_id'] ) && is_scalar( $_POST['session_id'] )
+				? sanitize_text_field( wp_unslash( (string) $_POST['session_id'] ) )
 				: '';
-			$results      = self::get_export_results( $export_token );
+			$session    = self::get_scan_session();
 
-			if ( null === $results ) {
-				wp_die( esc_html__( 'The saved scan is unavailable or has expired. Run the checks again before exporting.', 'indexlane-redirect-internal-link-auditor' ) );
+			if ( null === $session || ! hash_equals( (string) $session['id'], $session_id ) || 'complete' !== $session['status'] ) {
+				wp_die( esc_html__( 'The completed scan is unavailable or has expired. Complete the scan again before exporting.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 
 			$report_type = 'export_impact' === $action ? 'impact' : 'details';
-			self::send_csv( $results, $report_type );
+			self::send_csv( $session['results'], $report_type );
+		}
+
+		/**
+		 * Start a per-user scan session through authenticated AJAX.
+		 */
+		public static function ajax_start_scan(): void {
+			if ( ! self::verify_ajax_request() ) {
+				return;
+			}
+
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- The authenticated AJAX nonce is verified immediately above.
+			$post_data = wp_unslash( $_POST );
+			$settings  = self::get_request_settings( is_array( $post_data ) ? $post_data : array() );
+			if ( empty( $settings['post_types'] ) ) {
+				wp_send_json_error( array( 'message' => __( 'Select at least one public content type.', 'indexlane-redirect-internal-link-auditor' ) ), 400 );
+				return;
+			}
+
+			$existing = self::get_scan_session();
+			if ( is_array( $existing ) && in_array( $existing['status'], array( 'running', 'paused', 'limit_reached' ), true ) ) {
+				wp_send_json_error( array( 'message' => __( 'A scan is already in progress. Continue or cancel it before starting another.', 'indexlane-redirect-internal-link-auditor' ) ), 409 );
+				return;
+			}
+
+			$session = self::create_scan_session( $settings );
+			if ( ! self::save_scan_session( $session ) ) {
+				wp_send_json_error( array( 'message' => __( 'WordPress could not save the scan session. Check the site cache or database and try again.', 'indexlane-redirect-internal-link-auditor' ) ), 500 );
+				return;
+			}
+
+			wp_send_json_success( array( 'session' => self::build_session_summary( $session ) ) );
+		}
+
+		/**
+		 * Process one bounded scan batch through authenticated AJAX.
+		 */
+		public static function ajax_run_batch(): void {
+			if ( ! self::verify_ajax_request() ) {
+				return;
+			}
+
+			$session = self::get_requested_scan_session();
+			if ( null === $session ) {
+				return;
+			}
+
+			if ( 'running' === $session['status'] ) {
+				$session = self::process_scan_batch( $session );
+				if ( ! self::save_scan_session( $session ) ) {
+					wp_send_json_error( array( 'message' => __( 'WordPress could not save scan progress. The previous saved batch remains available.', 'indexlane-redirect-internal-link-auditor' ) ), 500 );
+					return;
+				}
+			}
+
+			wp_send_json_success( array( 'session' => self::build_session_summary( $session ) ) );
+		}
+
+		/**
+		 * Pause, resume, cancel, or extend a scan session.
+		 */
+		public static function ajax_control_scan(): void {
+			if ( ! self::verify_ajax_request() ) {
+				return;
+			}
+
+			$session = self::get_requested_scan_session();
+			if ( null === $session ) {
+				return;
+			}
+
+			// phpcs:disable WordPress.Security.NonceVerification.Missing -- The authenticated AJAX nonce is verified before session controls are read.
+			$command = isset( $_POST['command'] ) && is_scalar( $_POST['command'] )
+				? sanitize_key( wp_unslash( (string) $_POST['command'] ) )
+				: '';
+			// phpcs:enable WordPress.Security.NonceVerification.Missing
+
+			switch ( $command ) {
+				case 'pause':
+					if ( 'running' === $session['status'] ) {
+						$session['status'] = 'paused';
+					}
+					break;
+				case 'resume':
+					if ( in_array( $session['status'], array( 'paused', 'running' ), true ) ) {
+						$session['status'] = 'running';
+					}
+					break;
+				case 'extend':
+					if ( 'limit_reached' !== $session['status'] ) {
+						wp_send_json_error( array( 'message' => __( 'Another request allowance is available only after the current allowance is reached.', 'indexlane-redirect-internal-link-auditor' ) ), 409 );
+						return;
+					}
+					$session['request_limit'] += self::REQUEST_ALLOWANCE_INCREMENT;
+					$session['status']         = 'running';
+					break;
+				case 'cancel':
+					self::delete_scan_session();
+					wp_send_json_success(
+						array(
+							'session' => null,
+							'message' => __( 'The scan was canceled and its temporary evidence was removed.', 'indexlane-redirect-internal-link-auditor' ),
+						)
+					);
+					return;
+				default:
+					wp_send_json_error( array( 'message' => __( 'Unknown scan action.', 'indexlane-redirect-internal-link-auditor' ) ), 400 );
+					return;
+			}
+
+			if ( ! self::save_scan_session( $session ) ) {
+				wp_send_json_error( array( 'message' => __( 'WordPress could not save the scan state.', 'indexlane-redirect-internal-link-auditor' ) ), 500 );
+				return;
+			}
+
+			wp_send_json_success( array( 'session' => self::build_session_summary( $session ) ) );
+		}
+
+		/**
+		 * Validate the AJAX nonce and administrator capability.
+		 */
+		private static function verify_ajax_request(): bool {
+			if ( false === check_ajax_referer( self::NONCE_ACTION, 'nonce', false ) ) {
+				wp_send_json_error( array( 'message' => __( 'The scan request expired. Reload this page and try again.', 'indexlane-redirect-internal-link-auditor' ) ), 403 );
+				return false;
+			}
+
+			if ( ! current_user_can( self::CAPABILITY ) ) {
+				wp_send_json_error( array( 'message' => __( 'You do not have permission to run this scan.', 'indexlane-redirect-internal-link-auditor' ) ), 403 );
+				return false;
+			}
+
+			return true;
+		}
+
+		/**
+		 * Load and validate the session named by an AJAX request.
+		 *
+		 * @return array<string,mixed>|null
+		 */
+		private static function get_requested_scan_session(): ?array {
+			// phpcs:disable WordPress.Security.NonceVerification.Missing -- Every caller verifies the authenticated AJAX nonce before this helper runs.
+			$session_id = isset( $_POST['session_id'] ) && is_scalar( $_POST['session_id'] )
+				? sanitize_text_field( wp_unslash( (string) $_POST['session_id'] ) )
+				: '';
+			// phpcs:enable WordPress.Security.NonceVerification.Missing
+			$session    = self::get_scan_session();
+
+			if ( null === $session ) {
+				wp_send_json_error( array( 'message' => __( 'This scan session expired or is no longer available. Start a new scan.', 'indexlane-redirect-internal-link-auditor' ) ), 410 );
+				return null;
+			}
+
+			if ( '' === $session_id || ! hash_equals( (string) $session['id'], $session_id ) ) {
+				wp_send_json_error( array( 'message' => __( 'This browser is referring to an older scan session. Reload the page to see the current scan.', 'indexlane-redirect-internal-link-auditor' ) ), 409 );
+				return null;
+			}
+
+			return $session;
 		}
 
 		/**
@@ -126,21 +317,10 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				wp_die( esc_html__( 'You do not have permission to access this page.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 
-			$settings = self::default_settings();
-			$scan     = null;
-
-			if ( 'POST' === self::server_request_method() ) {
-				check_admin_referer( self::NONCE_ACTION, self::NONCE_NAME );
-				$post_data = wp_unslash( $_POST );
-				$action    = isset( $post_data['indexlane_rila_action'] ) && is_scalar( $post_data['indexlane_rila_action'] )
-					? sanitize_key( (string) $post_data['indexlane_rila_action'] )
-					: '';
-				if ( 'run' === $action ) {
-					$settings = self::get_request_settings( $post_data );
-					$scan     = self::run_scan( $settings );
-					$scan['export_token'] = self::store_export_results( $scan['results'] );
-				}
-			}
+			$session  = self::get_scan_session();
+			$settings = is_array( $session ) && isset( $session['settings'] ) && is_array( $session['settings'] )
+				? $session['settings']
+				: self::default_settings();
 
 			?>
 			<div class="wrap indexlane-rila-wrap">
@@ -150,8 +330,13 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 					<?php esc_html_e( 'Find internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains.', 'indexlane-redirect-internal-link-auditor' ); ?>
 				</p>
 
-				<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-form">
-					<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<?php self::render_session_panel( is_array( $session ) ? self::build_session_summary( $session ) : null ); ?>
+
+				<?php if ( is_array( $session ) && 'complete' === $session['status'] ) : ?>
+					<?php self::render_results( $session ); ?>
+				<?php endif; ?>
+
+				<form id="indexlane-rila-scan-form" method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-form">
 
 					<table class="form-table" role="presentation">
 						<tbody>
@@ -169,9 +354,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 											<?php echo esc_html( $label ); ?>
 										</label>
 									<?php endforeach; ?>
-									<p class="description">
-										<?php esc_html_e( 'Published posts, pages, and products are supported when the post type exists on this site.', 'indexlane-redirect-internal-link-auditor' ); ?>
-									</p>
+									<p class="description"><?php esc_html_e( 'Every selected public post type is scanned using its published post content.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 								</td>
 							</tr>
 							<tr>
@@ -179,12 +362,12 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 									<label for="indexlane-rila-old-domains"><?php esc_html_e( 'Old domains', 'indexlane-redirect-internal-link-auditor' ); ?></label>
 								</th>
 								<td>
-									<textarea
+					<textarea
 										id="indexlane-rila-old-domains"
 										name="old_domains"
 										rows="4"
 										class="large-text code"
-										placeholder="old-example.com&#10;staging.example.com"
+										placeholder="<?php esc_attr_e( "old-example.com\nstaging.example.com", 'indexlane-redirect-internal-link-auditor' ); ?>"
 									><?php echo esc_textarea( $settings['old_domains'] ); ?></textarea>
 									<p class="description">
 										<?php esc_html_e( 'Optional. Add one old or migration domain per line. Matching links are flagged even when status checks are limited to the current site.', 'indexlane-redirect-internal-link-auditor' ); ?>
@@ -192,19 +375,31 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 								</td>
 							</tr>
 							<tr>
-								<th scope="row"><?php esc_html_e( 'Scan limits', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="row"><?php esc_html_e( 'Content scope', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 								<td>
-									<label for="indexlane-rila-max-posts">
-										<?php esc_html_e( 'Maximum content items', 'indexlane-redirect-internal-link-auditor' ); ?>
+									<label class="indexlane-rila-choice">
+										<input type="radio" name="content_scope" value="all" <?php checked( 'all', $settings['content_scope'] ); ?> />
+										<?php esc_html_e( 'All published content', 'indexlane-redirect-internal-link-auditor' ); ?>
+									</label>
+									<label for="indexlane-rila-max-posts" class="indexlane-rila-choice">
+										<input type="radio" name="content_scope" value="limit" <?php checked( 'limit', $settings['content_scope'] ); ?> />
+										<?php esc_html_e( 'Newest', 'indexlane-redirect-internal-link-auditor' ); ?>
 										<input
 											id="indexlane-rila-max-posts"
 											type="number"
 											name="max_posts"
 											min="1"
-											max="100"
+											max="<?php echo esc_attr( (string) self::MAX_NUMERIC_CONTENT_ITEMS ); ?>"
 											value="<?php echo esc_attr( (string) $settings['max_posts'] ); ?>"
 										/>
+										<?php esc_html_e( 'content items', 'indexlane-redirect-internal-link-auditor' ); ?>
 									</label>
+									<p class="description"><?php esc_html_e( 'A complete scan uses small browser-driven batches and can be paused or resumed.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+								</td>
+							</tr>
+							<tr>
+								<th scope="row"><?php esc_html_e( 'Request settings', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<td>
 									<label for="indexlane-rila-timeout" class="indexlane-rila-inline-field">
 										<?php esc_html_e( 'Request timeout', 'indexlane-redirect-internal-link-auditor' ); ?>
 										<input
@@ -240,11 +435,14 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 					</table>
 
 					<p class="submit">
-						<button type="submit" name="indexlane_rila_action" value="run" class="button button-primary">
-							<?php esc_html_e( 'Run checks', 'indexlane-redirect-internal-link-auditor' ); ?>
+						<button id="indexlane-rila-start" type="submit" class="button button-primary">
+							<?php esc_html_e( 'Start scan', 'indexlane-redirect-internal-link-auditor' ); ?>
 						</button>
 					</p>
 				</form>
+				<div id="indexlane-rila-request-error" class="notice notice-error inline" hidden><p></p></div>
+
+				<noscript><div class="notice notice-error inline"><p><?php esc_html_e( 'JavaScript is required because scan batches run through authenticated WordPress AJAX requests.', 'indexlane-redirect-internal-link-auditor' ); ?></p></div></noscript>
 
 				<div class="notice notice-info inline">
 					<p>
@@ -252,12 +450,57 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 					</p>
 				</div>
 
-				<?php
-				if ( is_array( $scan ) ) {
-					self::render_results( $scan );
-				}
-				?>
 			</div>
+			<?php
+		}
+
+		/**
+		 * Render the persisted session state used and updated by the browser controller.
+		 *
+		 * @param array<string,mixed>|null $summary Session summary.
+		 */
+		private static function render_session_panel( ?array $summary ): void {
+			$has_session = is_array( $summary );
+			$stats       = $has_session ? $summary['stats'] : self::empty_stats();
+			$total       = $has_session ? max( 0, (int) $summary['total_items'] ) : 0;
+			$processed   = min( $total, (int) $stats['content_items_processed'] );
+			?>
+			<section id="indexlane-rila-session" class="indexlane-rila-session" <?php echo $has_session ? '' : 'hidden'; ?>>
+				<div class="indexlane-rila-session-heading">
+					<div>
+						<h2><?php esc_html_e( 'Scan session', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
+						<p id="indexlane-rila-state" class="indexlane-rila-state" aria-live="polite">
+							<?php echo $has_session ? esc_html( (string) $summary['state_label'] ) : ''; ?>
+						</p>
+					</div>
+					<div id="indexlane-rila-controls" class="indexlane-rila-controls">
+						<button id="indexlane-rila-pause" type="button" class="button" <?php echo ! $has_session || 'running' !== $summary['status'] ? 'hidden' : ''; ?>><?php esc_html_e( 'Pause', 'indexlane-redirect-internal-link-auditor' ); ?></button>
+						<button id="indexlane-rila-resume" type="button" class="button button-primary" <?php echo ! $has_session || 'paused' !== $summary['status'] ? 'hidden' : ''; ?>><?php esc_html_e( 'Continue scan', 'indexlane-redirect-internal-link-auditor' ); ?></button>
+						<button id="indexlane-rila-extend" type="button" class="button button-primary" <?php echo ! $has_session || 'limit_reached' !== $summary['status'] ? 'hidden' : ''; ?>><?php
+							echo esc_html(
+								sprintf(
+									/* translators: %d: number of additional outbound HTTP requests granted */
+									__( 'Continue with %d more requests', 'indexlane-redirect-internal-link-auditor' ),
+									self::REQUEST_ALLOWANCE_INCREMENT
+								)
+							);
+						?></button>
+						<button id="indexlane-rila-cancel" type="button" class="button button-link-delete" <?php echo ! $has_session || 'complete' === $summary['status'] ? 'hidden' : ''; ?>><?php esc_html_e( 'Cancel scan', 'indexlane-redirect-internal-link-auditor' ); ?></button>
+						<button id="indexlane-rila-new-scan" type="button" class="button button-primary" <?php echo ! $has_session || 'complete' !== $summary['status'] ? 'hidden' : ''; ?>><?php esc_html_e( 'Start another scan', 'indexlane-redirect-internal-link-auditor' ); ?></button>
+					</div>
+				</div>
+
+				<progress id="indexlane-rila-progress" max="<?php echo esc_attr( (string) max( 1, $total ) ); ?>" value="<?php echo esc_attr( (string) $processed ); ?>"></progress>
+				<p id="indexlane-rila-message" class="indexlane-rila-session-message" aria-live="polite"><?php echo $has_session ? esc_html( (string) $summary['message'] ) : ''; ?></p>
+
+				<div class="indexlane-rila-metrics">
+					<div><strong id="indexlane-rila-stat-content"><?php echo esc_html( (string) $stats['content_items_processed'] ); ?></strong><span><?php esc_html_e( 'Content processed', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
+					<div><strong id="indexlane-rila-stat-links"><?php echo esc_html( (string) $stats['links_extracted'] ); ?></strong><span><?php esc_html_e( 'Links extracted', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
+					<div><strong id="indexlane-rila-stat-destinations"><?php echo esc_html( (string) $stats['unique_destinations_checked'] ); ?></strong><span><?php esc_html_e( 'Unique destinations checked', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
+					<div><strong id="indexlane-rila-stat-requests"><?php echo esc_html( (string) $stats['http_requests'] ); ?></strong><span><?php esc_html_e( 'HTTP requests made', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
+					<div><strong id="indexlane-rila-stat-issues"><?php echo esc_html( (string) $stats['actionable_issues'] ); ?></strong><span><?php esc_html_e( 'Actionable issues found', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
+				</div>
+			</section>
 			<?php
 		}
 
@@ -270,68 +513,33 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			$stats   = $scan['stats'];
 			$results = $scan['results'];
 			?>
-			<div class="indexlane-rila-results">
-				<h2><?php esc_html_e( 'Results', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
+			<div id="indexlane-rila-results" class="indexlane-rila-results">
+				<h2><?php esc_html_e( 'Completed scan evidence', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 
 				<p>
 					<?php
 					echo esc_html(
 						sprintf(
-							/* translators: 1: source count, 2: link count, 3: audited count, 4: skipped count, 5: HTTP request count, 6: HTTP request limit */
-							__( 'Scanned %1$d content items, found %2$d links, audited %3$d relevant links, skipped %4$d unrelated external links, and made %5$d of at most %6$d outbound HTTP requests.', 'indexlane-redirect-internal-link-auditor' ),
-							(int) $stats['sources_scanned'],
-							(int) $stats['links_found'],
+							/* translators: 1: content count, 2: link count, 3: audited count, 4: skipped count, 5: unique destination count, 6: HTTP request count */
+							__( 'Processed %1$d content items, extracted %2$d links, audited %3$d relevant link occurrences, skipped %4$d unrelated external links, checked %5$d unique destinations, and made %6$d HTTP requests.', 'indexlane-redirect-internal-link-auditor' ),
+							(int) $stats['content_items_processed'],
+							(int) $stats['links_extracted'],
 							(int) $stats['links_audited'],
 							(int) $stats['skipped_external'],
-							(int) $stats['http_requests'],
-							self::MAX_HTTP_REQUESTS
+							(int) $stats['unique_destinations_checked'],
+							(int) $stats['http_requests']
 						)
 					);
 					?>
 				</p>
 
-				<?php if ( ! empty( $stats['checks_skipped_budget'] ) ) : ?>
-					<div class="notice notice-warning inline">
-						<p>
-							<?php
-							echo esc_html(
-								sprintf(
-									/* translators: %d: number of link occurrences not completely checked */
-									_n(
-										'%d link occurrence could not be completely checked because the outbound-request budget was exhausted.',
-										'%d link occurrences could not be completely checked because the outbound-request budget was exhausted.',
-										(int) $stats['checks_skipped_budget'],
-										'indexlane-redirect-internal-link-auditor'
-									),
-									(int) $stats['checks_skipped_budget']
-								)
-							);
-							?>
-						</p>
-					</div>
-				<?php endif; ?>
-
-				<?php if ( ! empty( $scan['export_token'] ) ) : ?>
-					<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>">
-						<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
-						<input type="hidden" name="export_token" value="<?php echo esc_attr( $scan['export_token'] ); ?>" />
-						<p>
-							<button type="submit" name="indexlane_rila_action" value="export_details" class="button">
-								<?php esc_html_e( 'Export detailed rows as CSV', 'indexlane-redirect-internal-link-auditor' ); ?>
-							</button>
-							<button type="submit" name="indexlane_rila_action" value="export_impact" class="button">
-								<?php esc_html_e( 'Export destination impact as CSV', 'indexlane-redirect-internal-link-auditor' ); ?>
-							</button>
-							<span class="description">
-								<?php esc_html_e( 'Uses this saved scan without making more HTTP requests. Saved scan data expires after one hour.', 'indexlane-redirect-internal-link-auditor' ); ?>
-							</span>
-						</p>
-					</form>
-				<?php else : ?>
-					<p class="description">
-						<?php esc_html_e( 'These results could not be saved temporarily, so CSV export is unavailable for this scan.', 'indexlane-redirect-internal-link-auditor' ); ?>
-					</p>
-				<?php endif; ?>
+				<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-export-actions">
+					<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+					<input type="hidden" name="session_id" value="<?php echo esc_attr( (string) $scan['id'] ); ?>" />
+					<button type="submit" name="indexlane_rila_action" value="export_details" class="button"><?php esc_html_e( 'Export detailed rows as CSV', 'indexlane-redirect-internal-link-auditor' ); ?></button>
+					<button type="submit" name="indexlane_rila_action" value="export_impact" class="button"><?php esc_html_e( 'Export destination impact as CSV', 'indexlane-redirect-internal-link-auditor' ); ?></button>
+					<span class="description"><?php esc_html_e( 'Both exports use this exact completed session without additional HTTP requests. The temporary session expires after 24 hours of inactivity.', 'indexlane-redirect-internal-link-auditor' ); ?></span>
+				</form>
 
 				<?php if ( empty( $results ) ) : ?>
 					<p><?php esc_html_e( 'No internal, old-domain, or staging/development-domain content links were found in the scanned content.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
@@ -460,23 +668,25 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
-		 * Get available supported content types.
+		 * Get every public post type that can contain published content.
 		 *
 		 * @return array<string,string>
 		 */
 		private static function get_available_post_types(): array {
-			$labels = array();
+			$labels  = array();
+			$objects = get_post_types( array( 'public' => true ), 'objects' );
 
-			foreach ( array( 'post', 'page', 'product' ) as $post_type ) {
-				if ( ! post_type_exists( $post_type ) ) {
+			foreach ( $objects as $post_type => $post_type_object ) {
+				if ( 'attachment' === $post_type ) {
 					continue;
 				}
 
-				$post_type_object = get_post_type_object( $post_type );
-				$labels[ $post_type ] = $post_type_object && isset( $post_type_object->labels->singular_name )
-					? $post_type_object->labels->singular_name
-					: $post_type;
+				$labels[ $post_type ] = isset( $post_type_object->labels->name )
+					? (string) $post_type_object->labels->name
+					: (string) $post_type;
 			}
+
+			natcasesort( $labels );
 
 			return $labels;
 		}
@@ -488,12 +698,13 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		 */
 		private static function default_settings(): array {
 			return array(
-				'post_types'            => array_keys( self::get_available_post_types() ),
-				'old_domains'           => '',
-				'old_domain_hosts'      => array(),
-				'max_posts'             => 50,
-				'timeout'               => 5.0,
-				'max_redirects'         => 5,
+				'post_types'       => array_keys( self::get_available_post_types() ),
+				'old_domains'      => '',
+				'old_domain_hosts' => array(),
+				'content_scope'    => 'limit',
+				'max_posts'        => 100,
+				'timeout'          => 5.0,
+				'max_redirects'    => 5,
 			);
 		}
 
@@ -512,17 +723,20 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			$post_types = array_map( 'sanitize_key', $post_types );
 			$post_types = array_values( array_intersect( $post_types, $available_types ) );
 
-			if ( ! empty( $post_types ) ) {
-				$settings['post_types'] = $post_types;
-			}
+			$settings['post_types'] = $post_types;
 
 			if ( isset( $post_data['old_domains'] ) && is_scalar( $post_data['old_domains'] ) ) {
 				$settings['old_domains'] = sanitize_textarea_field( (string) $post_data['old_domains'] );
 			}
 
 			if ( isset( $post_data['max_posts'] ) && is_scalar( $post_data['max_posts'] ) ) {
-				$settings['max_posts'] = min( 100, max( 1, absint( $post_data['max_posts'] ) ) );
+				$settings['max_posts'] = min( self::MAX_NUMERIC_CONTENT_ITEMS, max( 1, absint( $post_data['max_posts'] ) ) );
 			}
+
+			$scope                     = isset( $post_data['content_scope'] ) && is_scalar( $post_data['content_scope'] )
+				? sanitize_key( (string) $post_data['content_scope'] )
+				: '';
+			$settings['content_scope'] = 'all' === $scope ? 'all' : 'limit';
 
 			if ( isset( $post_data['timeout'] ) && is_scalar( $post_data['timeout'] ) ) {
 				$timeout             = (float) $post_data['timeout'];
@@ -539,85 +753,292 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
-		 * Run the content link audit.
+		 * Create a stable, resumable scan session.
 		 *
 		 * @param array<string,mixed> $settings Sanitized settings.
 		 * @return array<string,mixed>
 		 */
-		private static function run_scan( array $settings ): array {
-			$results = array();
-			$stats   = array(
-				'sources_scanned'       => 0,
-				'links_found'           => 0,
-				'links_audited'         => 0,
-				'skipped_external'      => 0,
-				'http_requests'         => 0,
-				'checks_skipped_budget' => 0,
+		private static function create_scan_session( array $settings ): array {
+			$snapshot = self::get_content_snapshot( $settings['post_types'] );
+			$total    = 'all' === $settings['content_scope']
+				? $snapshot['total_items']
+				: min( $snapshot['total_items'], (int) $settings['max_posts'] );
+			$now      = time();
+
+			return array(
+				'schema_version'     => self::SESSION_SCHEMA_VERSION,
+				'id'                 => wp_generate_uuid4(),
+				'status'             => 0 === $total ? 'complete' : 'running',
+				'created_at'         => $now,
+				'updated_at'         => $now,
+				'expires_at'         => $now + self::SESSION_LIFETIME,
+				'settings'           => $settings,
+				'total_items'        => $total,
+				'snapshot_max_id'    => $snapshot['max_id'],
+				'cursor_before_id'   => $snapshot['max_id'] + 1,
+				'content_done'       => 0 === $total,
+				'request_limit'      => self::INITIAL_REQUEST_ALLOWANCE,
+				'stats'              => self::empty_stats(),
+				'results'            => array(),
+				'checked_urls'       => array(),
+				'pending_checks'      => array(),
 			);
+		}
 
-			if ( empty( $settings['post_types'] ) ) {
-				return array(
-					'results' => $results,
-					'stats'   => $stats,
-				);
-			}
-
-			$current_host  = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
-			$checked_urls  = array();
-			$request_count = 0;
-			$budget_skips  = 0;
-
+		/**
+		 * Count the selected published corpus and record its highest post ID.
+		 *
+		 * @param array<int,string> $post_types Post types.
+		 * @return array{total_items:int,max_id:int}
+		 */
+		private static function get_content_snapshot( array $post_types ): array {
 			$query = new WP_Query(
 				array(
-					'post_type'           => $settings['post_types'],
+					'post_type'           => $post_types,
 					'post_status'         => 'publish',
-					'posts_per_page'      => (int) $settings['max_posts'],
+					'posts_per_page'      => 1,
+					'fields'              => 'ids',
 					'orderby'             => 'ID',
 					'order'               => 'DESC',
 					'ignore_sticky_posts' => true,
-					'no_found_rows'       => true,
+					'no_found_rows'       => false,
 				)
 			);
 
-			foreach ( $query->posts as $post ) {
-				$stats['sources_scanned']++;
+			return array(
+				'total_items' => max( 0, (int) $query->found_posts ),
+				'max_id'      => ! empty( $query->posts ) ? max( 0, (int) $query->posts[0] ) : 0,
+			);
+		}
 
-				$source_url = get_permalink( $post );
-				if ( ! $source_url ) {
+		/**
+		 * Process a bounded amount of content and HTTP work.
+		 *
+		 * @param array<string,mixed> $session Scan session.
+		 * @return array<string,mixed>
+		 */
+		private static function process_scan_batch( array $session ): array {
+			$batch_request_start = (int) $session['stats']['http_requests'];
+			$batch_content_count = 0;
+
+			while ( 'running' === $session['status'] ) {
+				if ( ! empty( $session['pending_checks'] ) ) {
+					if ( (int) $session['stats']['http_requests'] >= (int) $session['request_limit'] ) {
+						$session['status'] = 'limit_reached';
+						break;
+					}
+
+					if ( (int) $session['stats']['http_requests'] - $batch_request_start >= self::MAX_HTTP_REQUESTS_PER_BATCH ) {
+						break;
+					}
+
+					$session = self::process_pending_check_step( $session );
 					continue;
 				}
 
-				$source = array(
-					'id'       => (int) $post->ID,
-					'title'    => get_the_title( $post ),
-					'type'     => self::get_post_type_label( $post->post_type ),
-					'url'      => $source_url,
-					'edit_url' => get_edit_post_link( $post->ID, '' ),
-				);
+				if ( ! empty( $session['content_done'] ) ) {
+					$session['status'] = 'complete';
+					break;
+				}
 
-				$links                 = self::extract_links( (string) $post->post_content );
-				$stats['links_found'] += count( $links );
+				if ( $batch_content_count >= self::MAX_CONTENT_ITEMS_PER_BATCH ) {
+					break;
+				}
 
-				foreach ( $links as $link ) {
-					$row = self::audit_link( $link, $source, $settings, $current_host, $checked_urls, $request_count, $budget_skips );
+				$posts = self::get_next_scan_posts( $session, 1 );
+				if ( empty( $posts ) ) {
+					$session['content_done'] = true;
+					$session['total_items']  = (int) $session['stats']['content_items_processed'];
+					continue;
+				}
 
-					if ( 'skip' === $row ) {
-						$stats['skipped_external']++;
-						continue;
-					}
+				$post                        = $posts[0];
+				$session['cursor_before_id'] = (int) $post->ID;
+				$session                     = self::process_content_item( $session, $post );
+				$batch_content_count++;
 
-					$stats['links_audited']++;
-					$results[] = $row;
+				if ( (int) $session['stats']['content_items_processed'] >= (int) $session['total_items'] ) {
+					$session['content_done'] = true;
 				}
 			}
 
-			wp_reset_postdata();
-			$stats['http_requests']         = $request_count;
-			$stats['checks_skipped_budget'] = $budget_skips;
+			if ( 'running' === $session['status'] && ! empty( $session['content_done'] ) && empty( $session['pending_checks'] ) ) {
+				$session['status'] = 'complete';
+			}
 
+			return $session;
+		}
+
+		/**
+		 * Fetch the next published posts below the persisted keyset cursor.
+		 *
+		 * @param array<string,mixed> $session Scan session.
+		 * @param int                 $limit   Maximum posts.
+		 * @return array<int,WP_Post>
+		 */
+		private static function get_next_scan_posts( array $session, int $limit ): array {
+			add_filter( 'posts_where', array( __CLASS__, 'filter_scan_cursor_where' ), 10, 2 );
+			$query = new WP_Query(
+				array(
+					'post_type'                   => $session['settings']['post_types'],
+					'post_status'                 => 'publish',
+					'posts_per_page'              => max( 1, $limit ),
+					'orderby'                     => 'ID',
+					'order'                       => 'DESC',
+					'ignore_sticky_posts'         => true,
+					'no_found_rows'               => true,
+					'indexlane_rila_before_post_id' => (int) $session['cursor_before_id'],
+				)
+			);
+			remove_filter( 'posts_where', array( __CLASS__, 'filter_scan_cursor_where' ), 10 );
+
+			return is_array( $query->posts ) ? $query->posts : array();
+		}
+
+		/**
+		 * Apply the internal keyset cursor to scan-only WP_Query calls.
+		 *
+		 * @param string   $where SQL WHERE fragment.
+		 * @param WP_Query $query Query object.
+		 */
+		public static function filter_scan_cursor_where( string $where, $query ): string {
+			$before_id = absint( $query->get( 'indexlane_rila_before_post_id' ) );
+			if ( $before_id <= 0 ) {
+				return $where;
+			}
+
+			global $wpdb;
+			return $where . $wpdb->prepare( " AND {$wpdb->posts}.ID < %d", $before_id );
+		}
+
+		/**
+		 * Extract and queue every relevant occurrence from one content item.
+		 *
+		 * @param array<string,mixed> $session Scan session.
+		 * @param WP_Post             $post    Content item.
+		 * @return array<string,mixed>
+		 */
+		private static function process_content_item( array $session, $post ): array {
+			$session['stats']['content_items_processed']++;
+			$source_url = get_permalink( $post );
+			if ( ! $source_url ) {
+				return $session;
+			}
+
+			$source = array(
+				'id'       => (int) $post->ID,
+				'title'    => get_the_title( $post ),
+				'type'     => self::get_post_type_label( (string) $post->post_type ),
+				'url'      => (string) $source_url,
+				'edit_url' => get_edit_post_link( $post->ID, '' ),
+			);
+			$links  = self::extract_links( (string) $post->post_content );
+			$session['stats']['links_extracted'] += count( $links );
+
+			$current_host = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
+			foreach ( $links as $link ) {
+				$prepared = self::prepare_link_occurrence( $link, $source, $session['settings'], $current_host );
+				if ( 'skip' === $prepared['type'] ) {
+					$session['stats']['skipped_external']++;
+					continue;
+				}
+
+				$session['stats']['links_audited']++;
+				if ( 'row' === $prepared['type'] ) {
+					$session = self::append_result_row( $session, $prepared['row'] );
+					continue;
+				}
+
+				$cache_key = $prepared['cache_key'];
+				if ( isset( $session['checked_urls'][ $cache_key ] ) ) {
+					$row     = self::build_checked_result_row( $prepared['occurrence'], $session['checked_urls'][ $cache_key ] );
+					$session = self::append_result_row( $session, $row );
+					continue;
+				}
+
+				if ( ! isset( $session['pending_checks'][ $cache_key ] ) ) {
+					$session['pending_checks'][ $cache_key ] = array(
+						'url'         => $prepared['url'],
+						'occurrences' => array(),
+						'check_state' => self::initial_check_state( $prepared['url'] ),
+					);
+				}
+				$session['pending_checks'][ $cache_key ]['occurrences'][] = $prepared['occurrence'];
+			}
+
+			return $session;
+		}
+
+		/**
+		 * Process one HTTP step from the oldest queued unique destination.
+		 *
+		 * @param array<string,mixed> $session Scan session.
+		 * @return array<string,mixed>
+		 */
+		private static function process_pending_check_step( array $session ): array {
+			reset( $session['pending_checks'] );
+			$cache_key = key( $session['pending_checks'] );
+			if ( ! is_string( $cache_key ) || ! isset( $session['pending_checks'][ $cache_key ] ) ) {
+				return $session;
+			}
+
+			$pending = $session['pending_checks'][ $cache_key ];
+			$step    = self::advance_check_state(
+				$pending['check_state'],
+				(float) $session['settings']['timeout'],
+				(int) $session['settings']['max_redirects']
+			);
+
+			if ( ! empty( $step['request_made'] ) ) {
+				$session['stats']['http_requests']++;
+			}
+
+			if ( empty( $step['complete'] ) ) {
+				$session['pending_checks'][ $cache_key ]['check_state'] = $step['state'];
+				return $session;
+			}
+
+			$check                                  = $step['check'];
+			$session['checked_urls'][ $cache_key ]  = $check;
+			$session['stats']['unique_destinations_checked'] = count( $session['checked_urls'] );
+			foreach ( $pending['occurrences'] as $occurrence ) {
+				$session = self::append_result_row( $session, self::build_checked_result_row( $occurrence, $check ) );
+			}
+			unset( $session['pending_checks'][ $cache_key ] );
+
+			return $session;
+		}
+
+		/**
+		 * Append evidence and update the actionable-occurrence count.
+		 *
+		 * @param array<string,mixed> $session Scan session.
+		 * @param array<string,mixed> $row     Evidence row.
+		 * @return array<string,mixed>
+		 */
+		private static function append_result_row( array $session, array $row ): array {
+			$session['results'][] = $row;
+			if ( ! isset( $row['result_code'] ) || 'ok' !== $row['result_code'] ) {
+				$session['stats']['actionable_issues']++;
+			}
+
+			return $session;
+		}
+
+		/**
+		 * Build zeroed scan progress counters.
+		 *
+		 * @return array<string,int>
+		 */
+		private static function empty_stats(): array {
 			return array(
-				'results' => $results,
-				'stats'   => $stats,
+				'content_items_processed'      => 0,
+				'links_extracted'               => 0,
+				'links_audited'                 => 0,
+				'skipped_external'              => 0,
+				'unique_destinations_checked'   => 0,
+				'http_requests'                 => 0,
+				'actionable_issues'             => 0,
 			);
 		}
 
@@ -702,30 +1123,31 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
-		 * Audit a single extracted link.
+		 * Classify an occurrence before any HTTP work is scheduled.
 		 *
 		 * @param array{href:string,anchor:string} $link         Extracted link.
 		 * @param array<string,mixed>              $source       Source post data.
 		 * @param array<string,mixed>              $settings     Sanitized settings.
 		 * @param string                           $current_host Normalized current site host.
-		 * @param array<string,array<string,mixed>> $checked_urls Per-run URL request cache.
-		 * @param int                              $request_count Per-run HTTP request count.
-		 * @param int                              $budget_skips  Link occurrences not completely checked due to the request budget.
-		 * @return array<string,mixed>|string
+		 * @return array<string,mixed>
 		 */
-		private static function audit_link( array $link, array $source, array $settings, string $current_host, array &$checked_urls, int &$request_count, int &$budget_skips ) {
+		private static function prepare_link_occurrence( array $link, array $source, array $settings, string $current_host ): array {
 			$linked_url = self::normalize_link_url( $link['href'], (string) $source['url'] );
 
 			if ( '' === $linked_url ) {
-				return self::build_result_row(
-					$source,
-					$link,
-					$link['href'],
-					'',
-					'',
-					'',
-					'Invalid URL',
-					__( 'Error', 'indexlane-redirect-internal-link-auditor' )
+				return array(
+					'type' => 'row',
+					'row'  => self::build_result_row(
+						$source,
+						$link,
+						$link['href'],
+						'',
+						'',
+						'',
+						__( 'Invalid URL', 'indexlane-redirect-internal-link-auditor' ),
+						__( 'Error', 'indexlane-redirect-internal-link-auditor' ),
+						'error'
+					),
 				);
 			}
 
@@ -735,7 +1157,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			$is_staging  = ! $is_current && self::is_staging_or_dev_host( $linked_host );
 
 			if ( ! $is_current && ! $is_old && ! $is_staging ) {
-				return 'skip';
+				return array( 'type' => 'skip' );
 			}
 
 			$warnings = array();
@@ -751,77 +1173,67 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			if ( ! $should_request ) {
 				$warnings[] = __( 'Status check skipped by same-site scope', 'indexlane-redirect-internal-link-auditor' );
 
-				return self::build_result_row(
-					$source,
-					$link,
-					$linked_url,
-					'',
-					'',
-					'',
-					implode( '; ', $warnings ),
-					__( 'Needs review', 'indexlane-redirect-internal-link-auditor' )
+				return array(
+					'type' => 'row',
+					'row'  => self::build_result_row(
+						$source,
+						$link,
+						$linked_url,
+						'',
+						'',
+						'',
+						implode( '; ', $warnings ),
+						__( 'Needs review', 'indexlane-redirect-internal-link-auditor' ),
+						'needs_review'
+					),
 				);
 			}
 
 			if ( ! self::is_valid_http_url( $linked_url ) ) {
 				$warnings[] = __( 'Invalid HTTP URL', 'indexlane-redirect-internal-link-auditor' );
 
-				return self::build_result_row(
-					$source,
-					$link,
-					$linked_url,
-					'',
-					'',
-					'',
-					implode( '; ', $warnings ),
-					__( 'Error', 'indexlane-redirect-internal-link-auditor' )
+				return array(
+					'type' => 'row',
+					'row'  => self::build_result_row(
+						$source,
+						$link,
+						$linked_url,
+						'',
+						'',
+						'',
+						implode( '; ', $warnings ),
+						__( 'Error', 'indexlane-redirect-internal-link-auditor' ),
+						'error'
+					),
 				);
 			}
 
 			$cache_key = self::normalize_url_for_compare( $linked_url );
 
-			if ( isset( $checked_urls[ $cache_key ] ) ) {
-				$check = $checked_urls[ $cache_key ];
-			} elseif ( $request_count >= self::MAX_HTTP_REQUESTS ) {
-				$budget_skips++;
-				$warnings[] = sprintf(
-					/* translators: %d: maximum number of outbound HTTP requests per run */
-					__( 'Status check skipped after the %d-request budget was exhausted', 'indexlane-redirect-internal-link-auditor' ),
-					self::MAX_HTTP_REQUESTS
-				);
+			return array(
+				'type'       => 'check',
+				'cache_key'  => $cache_key,
+				'url'        => $linked_url,
+				'occurrence' => array(
+					'source'     => $source,
+					'link'       => $link,
+					'linked_url' => $linked_url,
+					'warnings'   => $warnings,
+					'is_old'     => $is_old,
+					'is_staging' => $is_staging,
+				),
+			);
+		}
 
-				return self::build_result_row(
-					$source,
-					$link,
-					$linked_url,
-					'',
-					'',
-					'',
-					self::format_warning_text( $warnings ),
-					__( 'Needs review', 'indexlane-redirect-internal-link-auditor' )
-				);
-			} else {
-				$check = self::check_url( $linked_url, (float) $settings['timeout'], (int) $settings['max_redirects'], $request_count );
-				$checked_urls[ $cache_key ] = $check;
-			}
-
-			if ( ! empty( $check['budget_exhausted'] ) ) {
-				$budget_skips++;
-				if ( ! empty( $check['error'] ) ) {
-					$warnings[] = $check['error'];
-				}
-
-				return self::build_result_row(
-					$source,
-					$link,
-					$linked_url,
-					implode( ' -> ', $check['statuses'] ),
-					$check['redirect_count'],
-					$check['final_url'],
-					self::format_warning_text( $warnings ),
-					__( 'Needs review', 'indexlane-redirect-internal-link-auditor' )
-				);
-			}
+		/**
+		 * Convert a completed unique-destination check into occurrence evidence.
+		 *
+		 * @param array<string,mixed> $occurrence Prepared occurrence.
+		 * @param array<string,mixed> $check      Completed check.
+		 * @return array<string,mixed>
+		 */
+		private static function build_checked_result_row( array $occurrence, array $check ): array {
+			$warnings = $occurrence['warnings'];
 
 			if ( ! $check['ok'] ) {
 				if ( ! empty( $check['error'] ) ) {
@@ -829,14 +1241,15 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				}
 
 				return self::build_result_row(
-					$source,
-					$link,
-					$linked_url,
+					$occurrence['source'],
+					$occurrence['link'],
+					$occurrence['linked_url'],
 					implode( ' -> ', $check['statuses'] ),
 					$check['redirect_count'],
 					$check['final_url'],
 					self::format_warning_text( $warnings ),
-					__( 'Error', 'indexlane-redirect-internal-link-auditor' )
+					__( 'Error', 'indexlane-redirect-internal-link-auditor' ),
+					'error'
 				);
 			}
 
@@ -892,189 +1305,218 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				);
 			}
 
-			$result = self::result_label_for_check( $warnings, $final_status, (int) $check['redirect_count'], $is_old, $is_staging );
+			$result_code = self::result_code_for_check(
+				$warnings,
+				$final_status,
+				(int) $check['redirect_count'],
+				(bool) $occurrence['is_old'],
+				(bool) $occurrence['is_staging']
+			);
+			$result      = self::result_label_for_code( $result_code );
 
 			return self::build_result_row(
-				$source,
-				$link,
-				$linked_url,
+				$occurrence['source'],
+				$occurrence['link'],
+				$occurrence['linked_url'],
 				implode( ' -> ', $check['statuses'] ),
 				$check['redirect_count'],
 				$check['final_url'],
 				self::format_warning_text( $warnings ),
-				$result
+				$result,
+				$result_code
 			);
 		}
 
 		/**
-		 * Check a URL and follow redirects manually.
+		 * Create the serializable state for one redirect-aware URL check.
 		 *
-		 * @param string $url           URL to check.
-		 * @param float  $timeout       Request timeout.
-		 * @param int    $max_redirects Max redirects.
-		 * @param int    $request_count Per-run outbound HTTP request count.
 		 * @return array<string,mixed>
 		 */
-		private static function check_url( string $url, float $timeout, int $max_redirects, int &$request_count ): array {
-			$current_url            = $url;
-			$statuses               = array();
-			$redirect_codes         = array();
-			$visited                = array();
-			$redirect_count         = 0;
-			$redirect_limit_reached = false;
-			$redirect_loop          = false;
-			$redirect_left_site     = false;
-			$current_host           = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
+		private static function initial_check_state( string $url ): array {
+			return array(
+				'current_url'            => $url,
+				'statuses'               => array(),
+				'redirect_codes'         => array(),
+				'visited'                => array(),
+				'redirect_count'         => 0,
+				'redirect_limit_reached' => false,
+				'redirect_loop'          => false,
+				'redirect_left_site'     => false,
+			);
+		}
 
-			while ( true ) {
-				$visited_key = self::normalize_url_for_compare( $current_url );
-				if ( isset( $visited[ $visited_key ] ) ) {
-					$redirect_loop = true;
-					break;
-				}
+		/**
+		 * Advance a URL check by at most one actual outbound request.
+		 *
+		 * @param array<string,mixed> $state         Persisted check state.
+		 * @param float               $timeout       Request timeout.
+		 * @param int                 $max_redirects Maximum redirects.
+		 * @return array<string,mixed>
+		 */
+		private static function advance_check_state( array $state, float $timeout, int $max_redirects ): array {
+			$current_url = (string) $state['current_url'];
+			$visited_key = self::normalize_url_for_compare( $current_url );
+			if ( isset( $state['visited'][ $visited_key ] ) ) {
+				$state['redirect_loop'] = true;
+				return array(
+					'complete'     => true,
+					'request_made' => false,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, true, '' ),
+				);
+			}
 
-				$visited[ $visited_key ] = true;
+			$state['visited'][ $visited_key ] = true;
+			$response = self::request_url_without_redirects( $current_url, $timeout );
+			if ( is_wp_error( $response ) ) {
+				return array(
+					'complete'     => true,
+					'request_made' => true,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, false, $response->get_error_message() ),
+				);
+			}
 
-				if ( $request_count >= self::MAX_HTTP_REQUESTS ) {
-					return array(
-						'ok'                     => false,
-						'error'                  => sprintf(
-							/* translators: %d: maximum number of outbound HTTP requests per run */
-							__( 'Status check incomplete because the %d-request budget was exhausted', 'indexlane-redirect-internal-link-auditor' ),
-							self::MAX_HTTP_REQUESTS
-						),
-						'statuses'               => $statuses,
-						'redirect_count'         => $redirect_count,
-						'redirect_codes'         => $redirect_codes,
-						'final_status'           => count( $statuses ) ? (int) end( $statuses ) : 0,
-						'final_url'              => $current_url,
-						'redirect_limit_reached' => false,
-						'redirect_loop'          => false,
-						'redirect_left_site'     => false,
-						'budget_exhausted'       => true,
-					);
-				}
+			$status              = (int) wp_remote_retrieve_response_code( $response );
+			$state['statuses'][] = (string) $status;
+			if ( ! in_array( $status, array( 301, 302, 303, 307, 308 ), true ) ) {
+				return array(
+					'complete'     => true,
+					'request_made' => true,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, true, '' ),
+				);
+			}
 
-				$request_count++;
-				$response = self::request_url_without_redirects( $current_url, $timeout );
+			$location = wp_remote_retrieve_header( $response, 'location' );
+			if ( is_array( $location ) ) {
+				$location = reset( $location );
+			}
+			$location = is_string( $location ) ? trim( $location ) : '';
+			if ( '' === $location ) {
+				return array(
+					'complete'     => true,
+					'request_made' => true,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, true, '' ),
+				);
+			}
 
-				if ( is_wp_error( $response ) ) {
-					return array(
-						'ok'                     => false,
-						'error'                  => $response->get_error_message(),
-						'statuses'               => $statuses,
-						'redirect_count'         => $redirect_count,
-						'redirect_codes'         => $redirect_codes,
-						'final_status'           => 0,
-						'final_url'              => $current_url,
-						'redirect_limit_reached' => $redirect_limit_reached,
-						'redirect_loop'          => $redirect_loop,
-						'redirect_left_site'     => $redirect_left_site,
-						'budget_exhausted'       => false,
-					);
-				}
+			$state['redirect_count']++;
+			$state['redirect_codes'][] = $status;
+			if ( (int) $state['redirect_count'] > $max_redirects ) {
+				$state['redirect_limit_reached'] = true;
+				return array(
+					'complete'     => true,
+					'request_made' => true,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, true, '' ),
+				);
+			}
 
-				$status     = (int) wp_remote_retrieve_response_code( $response );
-				$statuses[] = (string) $status;
+			$next_url = self::make_absolute_url( $location, $current_url );
+			$state['current_url'] = $next_url;
+			if ( ! self::is_valid_http_url( $next_url ) ) {
+				return array(
+					'complete'     => true,
+					'request_made' => true,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, false, __( 'Invalid redirect target', 'indexlane-redirect-internal-link-auditor' ) ),
+				);
+			}
 
-				if ( ! in_array( $status, array( 301, 302, 303, 307, 308 ), true ) ) {
-					return array(
-						'ok'                     => true,
-						'error'                  => '',
-						'statuses'               => $statuses,
-						'redirect_count'         => $redirect_count,
-						'redirect_codes'         => $redirect_codes,
-						'final_status'           => $status,
-						'final_url'              => $current_url,
-						'redirect_limit_reached' => $redirect_limit_reached,
-						'redirect_loop'          => $redirect_loop,
-						'redirect_left_site'     => $redirect_left_site,
-						'budget_exhausted'       => false,
-					);
-				}
+			$current_host = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
+			$next_host    = self::normalize_host( (string) wp_parse_url( $next_url, PHP_URL_HOST ) );
+			if ( ! self::hosts_match( $next_host, $current_host ) ) {
+				$state['redirect_left_site'] = true;
+				return array(
+					'complete'     => true,
+					'request_made' => true,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, true, '' ),
+				);
+			}
 
-				$location = wp_remote_retrieve_header( $response, 'location' );
-				if ( is_array( $location ) ) {
-					$location = reset( $location );
-				}
-				$location = is_string( $location ) ? trim( $location ) : '';
-
-				if ( '' === $location ) {
-					return array(
-						'ok'                     => true,
-						'error'                  => '',
-						'statuses'               => $statuses,
-						'redirect_count'         => $redirect_count,
-						'redirect_codes'         => $redirect_codes,
-						'final_status'           => $status,
-						'final_url'              => $current_url,
-						'redirect_limit_reached' => $redirect_limit_reached,
-						'redirect_loop'          => $redirect_loop,
-						'redirect_left_site'     => $redirect_left_site,
-						'budget_exhausted'       => false,
-					);
-				}
-
-				$redirect_count++;
-				$redirect_codes[] = $status;
-
-				if ( $redirect_count > $max_redirects ) {
-					$redirect_limit_reached = true;
-					break;
-				}
-
-				$next_url = self::make_absolute_url( $location, $current_url );
-
-				if ( ! self::is_valid_http_url( $next_url ) ) {
-					return array(
-						'ok'                     => false,
-						'error'                  => __( 'Invalid redirect target', 'indexlane-redirect-internal-link-auditor' ),
-						'statuses'               => $statuses,
-						'redirect_count'         => $redirect_count,
-						'redirect_codes'         => $redirect_codes,
-						'final_status'           => $status,
-						'final_url'              => $next_url,
-						'redirect_limit_reached' => $redirect_limit_reached,
-						'redirect_loop'          => $redirect_loop,
-						'redirect_left_site'     => $redirect_left_site,
-						'budget_exhausted'       => false,
-					);
-				}
-
-				if ( ! self::hosts_match( self::normalize_host( (string) wp_parse_url( $next_url, PHP_URL_HOST ) ), $current_host ) ) {
-					$redirect_left_site = true;
-
-					return array(
-						'ok'                     => true,
-						'error'                  => '',
-						'statuses'               => $statuses,
-						'redirect_count'         => $redirect_count,
-						'redirect_codes'         => $redirect_codes,
-						'final_status'           => $status,
-						'final_url'              => $next_url,
-						'redirect_limit_reached' => false,
-						'redirect_loop'          => false,
-						'redirect_left_site'     => true,
-						'budget_exhausted'       => false,
-					);
-				}
-
-				$current_url = $next_url;
+			$next_key = self::normalize_url_for_compare( $next_url );
+			if ( isset( $state['visited'][ $next_key ] ) ) {
+				$state['redirect_loop'] = true;
+				return array(
+					'complete'     => true,
+					'request_made' => true,
+					'state'        => $state,
+					'check'        => self::finished_check_from_state( $state, true, '' ),
+				);
 			}
 
 			return array(
-				'ok'                     => true,
-				'error'                  => '',
+				'complete'     => false,
+				'request_made' => true,
+				'state'        => $state,
+				'check'        => null,
+			);
+		}
+
+		/**
+		 * Turn serializable redirect state into the existing evidence contract.
+		 *
+		 * @param array<string,mixed> $state Check state.
+		 * @return array<string,mixed>
+		 */
+		private static function finished_check_from_state( array $state, bool $ok, string $error ): array {
+			$statuses = $state['statuses'];
+			return array(
+				'ok'                     => $ok,
+				'error'                  => $error,
 				'statuses'               => $statuses,
-				'redirect_count'         => $redirect_count,
-				'redirect_codes'         => $redirect_codes,
+				'redirect_count'         => (int) $state['redirect_count'],
+				'redirect_codes'         => $state['redirect_codes'],
 				'final_status'           => count( $statuses ) ? (int) end( $statuses ) : 0,
-				'final_url'              => $current_url,
-				'redirect_limit_reached' => $redirect_limit_reached,
-				'redirect_loop'          => $redirect_loop,
-				'redirect_left_site'     => $redirect_left_site,
+				'final_url'              => (string) $state['current_url'],
+				'redirect_limit_reached' => (bool) $state['redirect_limit_reached'],
+				'redirect_loop'          => (bool) $state['redirect_loop'],
+				'redirect_left_site'     => (bool) $state['redirect_left_site'],
 				'budget_exhausted'       => false,
 			);
+		}
+
+		/**
+		 * Synchronous compatibility wrapper used by focused low-level tests.
+		 *
+		 * Production sessions call advance_check_state() and persist between steps.
+		 *
+		 * @param string $url           URL to check.
+		 * @param float  $timeout       Request timeout.
+		 * @param int    $max_redirects Maximum redirects.
+		 * @param int    $request_count Existing request count.
+		 * @return array<string,mixed>
+		 */
+		private static function check_url( string $url, float $timeout, int $max_redirects, int &$request_count ): array {
+			$state = self::initial_check_state( $url );
+
+			while ( true ) {
+				if ( $request_count >= self::INITIAL_REQUEST_ALLOWANCE ) {
+					$check                     = self::finished_check_from_state(
+						$state,
+						false,
+						sprintf(
+							/* translators: %d: initial outbound HTTP request allowance */
+							__( 'Status check incomplete because the %d-request allowance was reached', 'indexlane-redirect-internal-link-auditor' ),
+							self::INITIAL_REQUEST_ALLOWANCE
+						)
+					);
+					$check['budget_exhausted'] = true;
+					return $check;
+				}
+
+				$step = self::advance_check_state( $state, $timeout, $max_redirects );
+				if ( ! empty( $step['request_made'] ) ) {
+					$request_count++;
+				}
+				if ( ! empty( $step['complete'] ) ) {
+					return $step['check'];
+				}
+				$state = $step['state'];
+			}
 		}
 
 		/**
@@ -1107,9 +1549,14 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		 * @param string                           $final_url      Final URL.
 		 * @param string                           $warning        Warning.
 		 * @param string                           $result         Result label.
+		 * @param string                           $result_code    Stable result code.
 		 * @return array<string,mixed>
 		 */
-		private static function build_result_row( array $source, array $link, string $linked_url, string $http_status, $redirect_count, string $final_url, string $warning, string $result ): array {
+		private static function build_result_row( array $source, array $link, string $linked_url, string $http_status, $redirect_count, string $final_url, string $warning, string $result, string $result_code = '' ): array {
+			if ( '' === $result_code ) {
+				$result_code = self::result_code_from_label( $result );
+			}
+
 			return array(
 				'source_title'    => $source['title'],
 				'source_type'     => $source['type'],
@@ -1122,11 +1569,12 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				'warning'         => $warning,
 				'anchor_text'     => $link['anchor'],
 				'result'          => $result,
+				'result_code'     => $result_code,
 			);
 		}
 
 		/**
-		 * Get a conservative result label.
+		 * Get a conservative, language-independent result code.
 		 *
 		 * @param array<int,string> $warnings       Warning texts.
 		 * @param int               $final_status   Final HTTP status.
@@ -1134,32 +1582,63 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		 * @param bool              $is_old         Whether link uses old domain.
 		 * @param bool              $is_staging     Whether link uses staging/dev host.
 		 */
-		private static function result_label_for_check( array $warnings, int $final_status, int $redirect_count, bool $is_old, bool $is_staging ): string {
+		private static function result_code_for_check( array $warnings, int $final_status, int $redirect_count, bool $is_old, bool $is_staging ): string {
 			if ( $final_status <= 0 ) {
-				return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
+				return 'needs_review';
 			}
 
 			if ( in_array( $final_status, array( 401, 403, 429 ), true ) ) {
-				return __( 'Blocked', 'indexlane-redirect-internal-link-auditor' );
+				return 'blocked';
 			}
 
 			if ( in_array( $final_status, array( 404, 410 ), true ) || $final_status >= 500 ) {
-				return __( 'Error', 'indexlane-redirect-internal-link-auditor' );
+				return 'error';
 			}
 
 			if ( $final_status >= 400 ) {
-				return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
+				return 'needs_review';
 			}
 
 			if ( $redirect_count > 0 ) {
-				return __( 'Warning', 'indexlane-redirect-internal-link-auditor' );
+				return 'warning';
 			}
 
 			if ( $is_old || $is_staging || ! empty( $warnings ) ) {
-				return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
+				return 'needs_review';
 			}
 
-			return __( 'OK', 'indexlane-redirect-internal-link-auditor' );
+			return 'ok';
+		}
+
+		/**
+		 * Translate a stable result code for display and export.
+		 */
+		private static function result_label_for_code( string $result_code ): string {
+			switch ( $result_code ) {
+				case 'error':
+					return __( 'Error', 'indexlane-redirect-internal-link-auditor' );
+				case 'blocked':
+					return __( 'Blocked', 'indexlane-redirect-internal-link-auditor' );
+				case 'warning':
+					return __( 'Warning', 'indexlane-redirect-internal-link-auditor' );
+				case 'ok':
+					return __( 'OK', 'indexlane-redirect-internal-link-auditor' );
+				default:
+					return __( 'Needs review', 'indexlane-redirect-internal-link-auditor' );
+			}
+		}
+
+		/**
+		 * Infer a stable code for compatibility with rows built from display labels.
+		 */
+		private static function result_code_from_label( string $result ): string {
+			foreach ( array( 'Error' => 'error', 'Blocked' => 'blocked', 'Warning' => 'warning', 'OK' => 'ok' ) as $label => $code ) {
+				if ( self::result_label_matches( $result, $label ) ) {
+					return $code;
+				}
+			}
+
+			return 'needs_review';
 		}
 
 		/**
@@ -1453,15 +1932,15 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			if ( 'impact' === $report_type ) {
 				$rows = array(
 					array(
-						'Destination',
-						'Impact',
-						'Occurrences',
-						'Affected Content Items',
-						'Result',
-						'HTTP Status Evidence',
-						'Maximum Observed Redirects',
-						'Observed Final URLs',
-						'Warning Evidence',
+						self::csv_safe( __( 'Destination', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Impact', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Affected Content Items', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Result', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'HTTP Status Evidence', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Maximum Observed Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Observed Final URLs', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Warning Evidence', 'indexlane-redirect-internal-link-auditor' ) ),
 					),
 				);
 
@@ -1484,16 +1963,16 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 
 			$rows = array(
 				array(
-					'Source Post/Page',
-					'Source Type',
-					'Source URL',
-					'Linked URL',
-					'HTTP Status',
-					'Redirect Count',
-					'Final URL',
-					'Warning',
-					'Anchor Text',
-					'Result',
+					self::csv_safe( __( 'Source Post/Page', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Source Type', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Source URL', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'HTTP Status', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Redirect Count', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Warning', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Anchor Text', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Result', 'indexlane-redirect-internal-link-auditor' ) ),
 				),
 			);
 
@@ -1516,52 +1995,126 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
-		 * Save one completed scan briefly so export does not repeat the scan.
+		 * Save the current user's session with a sliding abandonment expiry.
 		 *
-		 * @param array<int,array<string,mixed>> $results Result rows.
+		 * @param array<string,mixed> $session Scan session.
 		 */
-		private static function store_export_results( array $results ): string {
-			$token = wp_generate_uuid4();
-			$saved = set_transient(
-				self::export_transient_key( $token ),
-				array( 'results' => $results ),
-				self::EXPORT_TRANSIENT_LIFETIME
+		private static function save_scan_session( array $session ): bool {
+			$session['updated_at'] = time();
+			$session['expires_at'] = time() + self::SESSION_LIFETIME;
+
+			return set_transient( self::scan_session_transient_key(), $session, self::SESSION_LIFETIME );
+		}
+
+		/**
+		 * Load the current user's unexpired session.
+		 *
+		 * @return array<string,mixed>|null
+		 */
+		private static function get_scan_session(): ?array {
+			$session = get_transient( self::scan_session_transient_key() );
+
+			if (
+				! is_array( $session ) ||
+				! isset( $session['schema_version'], $session['id'], $session['status'], $session['expires_at'] ) ||
+				self::SESSION_SCHEMA_VERSION !== (int) $session['schema_version']
+			) {
+				return null;
+			}
+
+			if ( (int) $session['expires_at'] <= time() ) {
+				self::delete_scan_session();
+				return null;
+			}
+
+			return $session;
+		}
+
+		/**
+		 * Remove all temporary evidence for the current user's session.
+		 */
+		private static function delete_scan_session(): void {
+			delete_transient( self::scan_session_transient_key() );
+		}
+
+		/**
+		 * Build the single transient key scoped to the current user.
+		 */
+		private static function scan_session_transient_key(): string {
+			return self::SESSION_TRANSIENT_PREFIX . get_current_user_id();
+		}
+
+		/**
+		 * Return a browser-safe summary of the current session, if any.
+		 *
+		 * @return array<string,mixed>|null
+		 */
+		private static function get_scan_session_summary(): ?array {
+			$session = self::get_scan_session();
+			return is_array( $session ) ? self::build_session_summary( $session ) : null;
+		}
+
+		/**
+		 * Build progress data without exposing accumulated evidence in page scripts.
+		 *
+		 * @param array<string,mixed> $session Scan session.
+		 * @return array<string,mixed>
+		 */
+		private static function build_session_summary( array $session ): array {
+			$request_limit = max( 0, (int) $session['request_limit'] );
+			$requests      = max( 0, (int) $session['stats']['http_requests'] );
+
+			return array(
+				'id'                          => (string) $session['id'],
+				'status'                      => (string) $session['status'],
+				'state_label'                 => self::scan_state_label( (string) $session['status'] ),
+				'message'                     => self::scan_state_message( (string) $session['status'] ),
+				'total_items'                 => max( 0, (int) $session['total_items'] ),
+				'request_limit'               => $request_limit,
+				'request_allowance_remaining' => max( 0, $request_limit - $requests ),
+				'stats'                       => $session['stats'],
+				'can_export'                  => 'complete' === $session['status'],
 			);
-
-			return $saved ? $token : '';
 		}
 
 		/**
-		 * Load results for the current administrator and scan token.
-		 *
-		 * @return array<int,array<string,mixed>>|null
+		 * Human-readable state label.
 		 */
-		private static function get_export_results( string $token ): ?array {
-			if ( ! self::is_valid_export_token( $token ) ) {
-				return null;
+		private static function scan_state_label( string $status ): string {
+			switch ( $status ) {
+				case 'running':
+					return __( 'Scanning', 'indexlane-redirect-internal-link-auditor' );
+				case 'paused':
+					return __( 'Paused', 'indexlane-redirect-internal-link-auditor' );
+				case 'limit_reached':
+					return __( 'Request allowance reached', 'indexlane-redirect-internal-link-auditor' );
+				case 'complete':
+					return __( 'Complete', 'indexlane-redirect-internal-link-auditor' );
+				default:
+					return __( 'Unavailable', 'indexlane-redirect-internal-link-auditor' );
 			}
+		}
 
-			$saved = get_transient( self::export_transient_key( $token ) );
-
-			if ( ! is_array( $saved ) || ! isset( $saved['results'] ) || ! is_array( $saved['results'] ) ) {
-				return null;
+		/**
+		 * Plain-language state consequence and next action.
+		 */
+		private static function scan_state_message( string $status ): string {
+			switch ( $status ) {
+				case 'running':
+					return __( 'Keep this page open while the browser requests the next small batch. You can pause safely after the current batch.', 'indexlane-redirect-internal-link-auditor' );
+				case 'paused':
+					return __( 'Progress and accumulated evidence are saved. Continue here now or after reloading the page.', 'indexlane-redirect-internal-link-auditor' );
+				case 'limit_reached':
+					return sprintf(
+						/* translators: %d: number of requests granted by the continue action */
+						__( 'Progress is saved before any incomplete destination evidence is recorded. Continue to allow up to %d more outbound requests.', 'indexlane-redirect-internal-link-auditor' ),
+						self::REQUEST_ALLOWANCE_INCREMENT
+					);
+				case 'complete':
+					return __( 'Every selected content item and queued same-site destination has been processed. The CSV exports use this exact evidence.', 'indexlane-redirect-internal-link-auditor' );
+				default:
+					return '';
 			}
-
-			return $saved['results'];
-		}
-
-		/**
-		 * Build a transient key scoped to the current user.
-		 */
-		private static function export_transient_key( string $token ): string {
-			return self::EXPORT_TRANSIENT_PREFIX . get_current_user_id() . '_' . str_replace( '-', '', strtolower( $token ) );
-		}
-
-		/**
-		 * Validate an export token before using it in a transient key.
-		 */
-		private static function is_valid_export_token( string $token ): bool {
-			return 1 === preg_match( '/^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/i', $token );
 		}
 
 		/**

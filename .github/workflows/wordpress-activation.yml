@@ -55,11 +55,14 @@ jobs:
       - name: Install tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y default-mysql-client rsync
+          sudo apt-get install -y default-mysql-client gettext rsync
           curl -L -o wp-cli.phar https://raw.githubusercontent.com/wp-cli/builds/gh-pages/phar/wp-cli.phar
           php wp-cli.phar --info
           chmod +x wp-cli.phar
           sudo mv wp-cli.phar /usr/local/bin/wp
+
+      - name: Verify translation readiness and POT extraction
+        run: ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-link-auditor.pot
 
       - name: Wait for database
         run: |
@@ -112,3 +115,44 @@ jobs:
           wp plugin activate indexlane-redirect-internal-link-auditor --path=/tmp/wp
           wp plugin status indexlane-redirect-internal-link-auditor --path=/tmp/wp
           wp eval 'if ( ! class_exists( "IndexLane_Redirect_Internal_Link_Auditor" ) ) { fwrite( STDERR, "Plugin class not loaded.\n" ); exit( 1 ); }' --path=/tmp/wp
+
+      - name: Run WordPress integration tests
+        run: wp eval-file /tmp/wp/wp-content/plugins/indexlane-redirect-internal-link-auditor/tests/wordpress-integration.php --path=/tmp/wp
+
+      - name: Prepare authenticated AJAX test site
+        run: |
+          mkdir -p /tmp/wp/wp-content/mu-plugins
+          cp /tmp/wp/wp-content/plugins/indexlane-redirect-internal-link-auditor/tests/fixtures/ajax-http-fixture.php /tmp/wp/wp-content/mu-plugins/
+          wp config set INDEXLANE_RILA_E2E true --raw --path=/tmp/wp
+          wp config set DISABLE_WP_CRON true --raw --path=/tmp/wp
+          wp option update home http://127.0.0.1:8080 --path=/tmp/wp
+          wp option update siteurl http://127.0.0.1:8080 --path=/tmp/wp
+          wp eval-file /tmp/wp/wp-content/plugins/indexlane-redirect-internal-link-auditor/tests/wordpress-ajax-setup.php --path=/tmp/wp
+
+      - name: Start WordPress web server
+        run: |
+          php -S 127.0.0.1:8080 -t /tmp/wp >/tmp/indexlane-rila-wp-server.log 2>&1 &
+          echo $! >/tmp/indexlane-rila-wp-server.pid
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8080/wp-login.php >/dev/null; then
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/indexlane-rila-wp-server.log
+          exit 1
+
+      - name: Run authenticated AJAX end-to-end tests
+        run: bash tests/wordpress-ajax-e2e.sh http://127.0.0.1:8080 admin password
+
+      - name: Show WordPress server log on failure
+        if: failure()
+        run: cat /tmp/indexlane-rila-wp-server.log || true
+
+      - name: Stop WordPress web server
+        if: always()
+        run: |
+          if [ -f /tmp/indexlane-rila-wp-server.pid ]; then
+            kill "$(cat /tmp/indexlane-rila-wp-server.pid)" || true
+          fi
+          rm -f /tmp/indexlane-rila-wp-server.pid /tmp/indexlane-rila-wp-server.log

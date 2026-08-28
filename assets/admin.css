@@ -1,20 +1,148 @@
-.indexlane-rila-wrap .indexlane-rila-checkbox {
-	display: inline-block;
-	margin-right: 18px;
+.indexlane-rila-wrap {
+	max-width: 1480px;
+}
+
+.indexlane-rila-wrap > p,
+.indexlane-rila-wrap > .notice,
+.indexlane-rila-form,
+.indexlane-rila-session {
+	max-width: 1080px;
+}
+
+.indexlane-rila-form,
+.indexlane-rila-session {
+	box-sizing: border-box;
+	margin-top: 20px;
+	padding: 8px 24px 2px;
+	border: 1px solid #c3c4c7;
+	background: #fff;
+	box-shadow: 0 1px 1px rgba( 0, 0, 0, 0.04 );
+}
+
+.indexlane-rila-form.is-disabled {
+	opacity: 0.66;
+}
+
+.indexlane-rila-wrap .indexlane-rila-checkbox,
+.indexlane-rila-wrap .indexlane-rila-choice {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0 20px 8px 0;
 }
 
 .indexlane-rila-wrap .indexlane-rila-inline-field {
-	display: inline-block;
-	margin-left: 18px;
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	margin: 0 18px 8px 0;
 }
 
 .indexlane-rila-wrap input[type="number"] {
-	margin-left: 6px;
-	width: 86px;
+	width: 88px;
+}
+
+.indexlane-rila-wrap textarea {
+	max-width: 720px;
+}
+
+.indexlane-rila-session {
+	padding: 20px 24px 24px;
+	border-left: 4px solid #2271b1;
+}
+
+.indexlane-rila-session[hidden],
+.indexlane-rila-controls button[hidden] {
+	display: none;
+}
+
+.indexlane-rila-session-heading {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 20px;
+}
+
+.indexlane-rila-session-heading h2 {
+	margin: 0 0 5px;
+}
+
+.indexlane-rila-state {
+	display: inline-block;
+	margin: 0;
+	padding: 3px 9px;
+	border-radius: 12px;
+	background: #e5f3ff;
+	color: #0a4b78;
+	font-weight: 600;
+}
+
+.indexlane-rila-controls {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: flex-end;
+	gap: 8px;
+}
+
+.indexlane-rila-session progress {
+	display: block;
+	width: 100%;
+	height: 12px;
+	margin: 20px 0 8px;
+	accent-color: #2271b1;
+}
+
+.indexlane-rila-session-message {
+	margin: 8px 0 18px;
+	color: #50575e;
+}
+
+.indexlane-rila-metrics {
+	display: grid;
+	grid-template-columns: repeat( 5, minmax( 130px, 1fr ) );
+	gap: 1px;
+	overflow: hidden;
+	border: 1px solid #dcdcde;
+	background: #dcdcde;
+}
+
+.indexlane-rila-metrics > div {
+	min-height: 82px;
+	padding: 14px 16px;
+	background: #f6f7f7;
+}
+
+.indexlane-rila-metrics strong,
+.indexlane-rila-metrics span {
+	display: block;
+}
+
+.indexlane-rila-metrics strong {
+	margin-bottom: 5px;
+	color: #1d2327;
+	font-size: 24px;
+	font-variant-numeric: tabular-nums;
+	line-height: 1.1;
+}
+
+.indexlane-rila-metrics span {
+	color: #50575e;
+}
+
+.indexlane-rila-export-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 14px 0 22px;
+}
+
+.indexlane-rila-export-actions .description {
+	flex-basis: 100%;
 }
 
 .indexlane-rila-results {
-	margin-top: 24px;
+	margin-top: 28px;
 }
 
 .indexlane-rila-results table {
@@ -42,4 +170,47 @@
 .indexlane-rila-results th {
 	vertical-align: top;
 	word-break: break-word;
+}
+
+.indexlane-rila-results th {
+	overflow-wrap: normal;
+	word-break: normal;
+}
+
+.indexlane-rila-impact-table td {
+	overflow-wrap: normal;
+	word-break: normal;
+}
+
+.indexlane-rila-impact-table td:first-child,
+.indexlane-rila-impact-table td:nth-child(8) {
+	overflow-wrap: anywhere;
+	word-break: break-word;
+}
+
+@media screen and ( max-width: 1100px ) {
+	.indexlane-rila-metrics {
+		grid-template-columns: repeat( 2, minmax( 140px, 1fr ) );
+	}
+}
+
+@media screen and ( max-width: 782px ) {
+	.indexlane-rila-form,
+	.indexlane-rila-session {
+		padding-right: 16px;
+		padding-left: 16px;
+	}
+
+	.indexlane-rila-session-heading {
+		display: block;
+	}
+
+	.indexlane-rila-controls {
+		justify-content: flex-start;
+		margin-top: 16px;
+	}
+
+	.indexlane-rila-metrics {
+		grid-template-columns: 1fr;
+	}
 }
