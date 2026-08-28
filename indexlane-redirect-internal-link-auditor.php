@@ -3,7 +3,7 @@
  * Plugin Name: IndexLane Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
  * Description: Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
- * Version: 0.3.0
+ * Version: 0.3.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -24,7 +24,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
 	final class IndexLane_Redirect_Internal_Link_Auditor {
-		private const VERSION                         = '0.3.0';
+		private const VERSION                         = '0.3.1';
 		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY                      = 'manage_options';
 		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';

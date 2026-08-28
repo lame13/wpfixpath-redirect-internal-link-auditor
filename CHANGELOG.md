@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.1 - 2026-08-28
+
+- Removed the authenticated AJAX end-to-end harness's undeclared ripgrep dependency so release validation runs on standard GitHub-hosted runners.
+
 ## 0.3.0
 
 - Replaced the bounded synchronous form request with authenticated, browser-driven WordPress AJAX batches.

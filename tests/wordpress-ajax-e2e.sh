@@ -50,7 +50,7 @@ curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
 	"${base_url}/wp-login.php" -o "${temporary_root}/dashboard.html"
 
 curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${page_html}"
-if ! rg -q 'Redirect &amp; Internal Link Auditor' "${page_html}"; then
+if ! grep -Fq -- 'Redirect &amp; Internal Link Auditor' "${page_html}"; then
 	printf 'The authenticated Tools page did not render.\n' >&2
 	exit 1
 fi
@@ -104,7 +104,7 @@ assert_success "${paused_response}"
 [[ "$(json_value "${paused_response}" data.session.status)" == "paused" ]]
 
 curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${page_html}"
-if ! rg -q '"status":"paused"' "${page_html}"; then
+if ! grep -Fq -- '"status":"paused"' "${page_html}"; then
 	printf 'The paused session was not restored after page reload.\n' >&2
 	exit 1
 fi
@@ -177,7 +177,7 @@ curl -fsS -b "${cookie_jar}" -D "${details_headers}" \
 	--data-urlencode "session_id=${session_id}" \
 	--data "indexlane_rila_action=export_details" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${details_csv}"
-rg -qi 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-details-' "${details_headers}"
+grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-details-' "${details_headers}"
 [[ "$(wc -l < "${details_csv}" | tr -d ' ')" == "283" ]]
 
 impact_csv="${temporary_root}/impact.csv"

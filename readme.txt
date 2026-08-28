@@ -4,7 +4,7 @@ Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.3.0
+Stable tag: 0.3.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -88,6 +88,10 @@ No. Old, staging, and development-domain links are flagged but not fetched. A sa
 3. Completed destination-impact and occurrence evidence with exact-session CSV exports.
 
 == Changelog ==
+
+= 0.3.1 =
+
+* Fixed authenticated AJAX end-to-end release validation on standard GitHub-hosted runners.
 
 = 0.3.0 =
 
