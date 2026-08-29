@@ -35,6 +35,9 @@ grep -Fq '"X-Domain: indexlane-redirect-internal-link-auditor\n"' "${pot_path}"
 grep -Fq 'msgid "Continue with %d more requests"' "${pot_path}"
 grep -Fq 'msgid "Source Post/Page"' "${pot_path}"
 grep -Fq 'msgid "Pausing after the current batch…"' "${pot_path}"
+grep -Fq 'msgid "Content link coverage"' "${pot_path}"
+grep -Fq 'msgid "No incoming links detected in scanned content."' "${pot_path}"
+grep -Fq 'msgid "Target Title"' "${pot_path}"
 
 if grep -Eq '^#: (dist|tests)/' "${pot_path}"; then
 	printf 'POT extraction unexpectedly included non-release files.\n' >&2

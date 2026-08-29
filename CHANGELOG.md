@@ -1,10 +1,18 @@
 # Changelog
 
+## 0.4.0 - 2026-08-29
+
+- Added destination-oriented content link coverage for every published content item in a completed scan.
+- Added incoming and outgoing link counts, distinct linking sources and destinations, anchor-text variants, self-link counts, and direct-versus-redirected evidence.
+- Added a target detail view and a filter for content with zero or one detected linking source.
+- Resolved redirected links to their final published WordPress content item while retaining the original redirect evidence and making no additional HTTP requests.
+- Added an exact-session target-coverage CSV export, updated screenshots and documentation, and expanded behavioral, integration, translation, and authenticated AJAX coverage.
+
 ## 0.3.1 - 2026-08-28
 
 - Removed the authenticated AJAX end-to-end harness's undeclared ripgrep dependency so release validation runs on standard GitHub-hosted runners.
 
-## 0.3.0
+## 0.3.0 - 2026-08-28
 
 - Replaced the bounded synchronous form request with authenticated, browser-driven WordPress AJAX batches.
 - Added resumable per-administrator scan sessions for all published content or a numeric newest-content limit.
@@ -19,11 +27,11 @@
 - Added repeatable source auditing and local POT extraction verification without bundling translations.
 - Added WordPress-loaded integration tests and authenticated AJAX end-to-end coverage.
 
-## 0.2.2
+## 0.2.2 - 2026-08-26
 
 - Moved the admin page CSS into a stylesheet enqueued only on the plugin's Tools screen.
 
-## 0.2.1
+## 0.2.1 - 2026-08-25
 
 - Renamed the pre-approval plugin to IndexLane Redirect & Internal Link Auditor and aligned its slug, text domain, runtime identifiers, tests, and package layout.
 - Prepared plugin metadata and packaging for the WordPress.org Plugin Directory.
@@ -33,7 +41,7 @@
 - Resolved Plugin Check findings for translation loading, nonce verification, translatable labels, and CSV output.
 - Moved the project release history to this root changelog instead of duplicating it in the README.
 
-## 0.2.0
+## 0.2.0 - 2026-08-24
 
 - Added a destination-centric impact view for broken/error and redirected targets.
 - Grouped normalized destinations by total link occurrences and distinct affected content items.
@@ -43,22 +51,22 @@
 - Derived both the admin summary and its export from the exact saved scan without additional HTTP requests.
 - Strengthened CSV formula-injection protection for values with leading whitespace or line breaks.
 
-## 0.1.3
+## 0.1.3 - 2026-07-21
 
 - Kept trailing-slash URL variants distinct in request caching and redirect-loop detection.
 - Made the 250-request limit count every actual outbound HTTP request, including redirect hops.
 - Replaced HEAD-derived status claims with bounded GET verification through the safe WordPress HTTP API.
 - Exported the exact completed scan from short-lived per-user storage instead of rescanning content and URLs.
 
-## 0.1.2
+## 0.1.2 - 2026-05-24
 
 - Rewrote README, readme, and plugin metadata copy in a less defensive voice.
 
-## 0.1.1
+## 0.1.1 - 2026-05-24
 
 - Updated public screenshots from the current WordPress admin UI.
 
-## 0.1.0
+## 0.1.0 - 2026-05-24
 
 - Added admin-only Tools screen.
 - Added scan support for published posts, pages, and products when available.

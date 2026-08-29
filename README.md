@@ -1,8 +1,8 @@
 # IndexLane Redirect & Internal Link Auditor
 
-Find broken, redirected, old-domain, and staging-domain links in the stored content of any public WordPress post type.
+Audit redirects, broken links, and content link coverage in the stored content of any public WordPress post type.
 
-Version 0.3 runs complete, resumable scan sessions from wp-admin. It produces a destination-impact view and exact occurrence evidence without editing content, following external redirect targets, or calling an IndexLane service.
+Version 0.4 runs complete, resumable scan sessions from wp-admin. It adds destination-oriented content link coverage to the existing destination-impact and exact-occurrence evidence without editing content, following external redirect targets, or calling an IndexLane service.
 
 Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://indexlane.dev/plugins/redirect-internal-link-auditor)
 
@@ -15,7 +15,7 @@ Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://ind
 - Pause, continue, cancel, or reload and resume one per-administrator session.
 - Deduplicate requests for the same destination across the entire session while retaining every source occurrence.
 - Stop at an explicit 250-request session allowance and continue with another 250 requests when needed.
-- Export destination-impact and detailed-row CSVs only from exact completed-session evidence.
+- Export target-coverage, destination-impact, and detailed-row CSVs only from exact completed-session evidence.
 
 Each AJAX batch processes at most five content items and makes at most five actual outbound HTTP requests. Redirect chains persist between batches, so an allowance boundary never turns partial redirect evidence into a result row.
 
@@ -31,6 +31,24 @@ Each AJAX batch processes at most five content items and makes at most five actu
 - occurrence source, edit URL, anchor text, status chain, redirect count, final URL, warning, and result
 
 Unrelated external links are skipped. Old, staging, and development-domain links are reported but never fetched.
+
+## Content link coverage
+
+The completed report contains one row per scanned published content item. Each row includes:
+
+- target title and URL
+- incoming link occurrences and distinct linking content items
+- outgoing internal-link occurrences and distinct internal destinations
+- anchor-text variants pointing to the target
+- self-link count
+- direct and redirected incoming-link counts
+- a conservative zero-, one-, or multiple-source status
+
+Open a target's details to review every saved source, anchor, linked URL, status chain, and final URL. Filter the report to content with zero or one detected linking source, or export the complete target-coverage CSV.
+
+When a scanned link redirects to a published WordPress URL, coverage counts the occurrence toward that final content item and retains the redirect evidence. The coverage projection makes no additional HTTP requests.
+
+“No incoming links detected in scanned content” describes only the selected items' stored `post_content`. It does not inspect menus, templates, widgets, shortcode output, or rendered page-builder content.
 
 ## Destination impact
 
@@ -53,6 +71,20 @@ This is a stored-content link checker, not a rendered-site crawler. It does not 
 HTTP checks use bounded GET response bodies, administrator-selected timeouts and redirect limits, WordPress unsafe-URL rejection, and manual same-site redirect handling.
 
 ## CSV exports
+
+Target-coverage columns:
+
+- Target Title
+- Target URL
+- Incoming Link Occurrences
+- Distinct Linking Content Items
+- Outgoing Internal-Link Occurrences
+- Distinct Internal Destinations
+- Anchor-Text Variants
+- Self-Link Count
+- Direct Incoming Links
+- Redirected Incoming Links
+- Status
 
 Destination impact columns:
 
@@ -79,7 +111,7 @@ Detailed-row columns:
 - Anchor Text
 - Result
 
-Both exports protect spreadsheet cells that could otherwise be interpreted as formulas.
+All exports protect spreadsheet cells that could otherwise be interpreted as formulas.
 
 ## Result labels
 
@@ -101,7 +133,7 @@ php tests/behavioral.php
 WP_CLI_BIN=/path/to/wp ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-link-auditor.pot
 ```
 
-The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded integration suite, and exercises the authenticated AJAX lifecycle and both CSV downloads over HTTP.
+The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded integration suite, and exercises the authenticated AJAX lifecycle, coverage filter and detail views, and all three CSV downloads over HTTP.
 
 Build the production ZIP for WordPress.org submission:
 

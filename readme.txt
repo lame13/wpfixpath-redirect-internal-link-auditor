@@ -4,21 +4,21 @@ Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.3.1
+Stable tag: 0.4.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
+Audit redirects, broken links, and content link coverage inside WordPress.
 
 == Description ==
 
-IndexLane Redirect & Internal Link Auditor finds internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains.
+IndexLane Redirect & Internal Link Auditor finds internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains. It also shows how scanned content links to each published item.
 
 It runs from inside WordPress admin, stays read-only, and produces evidence a site owner or developer can review or export. It does not auto-fix content or mutate the database.
 
 Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor).
 
-Version 0.3 can:
+Version 0.4 can:
 
 * Scan all published content or a numeric limit of the newest content.
 * Scan any registered public post type, not only posts, pages, and products.
@@ -31,12 +31,18 @@ Version 0.3 can:
 * Show the source post/page.
 * Group broken/error and redirected destinations by occurrence count and distinct affected content count.
 * Show status, redirect, effective-final-URL, warning, and result evidence for each destination.
-* Export separate destination-impact and detailed-row CSV reports.
+* Report one content-link coverage row per scanned published item.
+* Count incoming occurrences, distinct linking items, outgoing occurrences, distinct destinations, anchor variants, self-links, and direct versus redirected incoming links.
+* Resolve redirects to their final published WordPress content item while retaining redirect evidence.
+* Filter content with zero or one detected linking source and open every target's source-and-anchor details.
+* Export separate target-coverage, destination-impact, and detailed-row CSV reports.
 * Show live content, link, unique-destination, HTTP-request, and actionable-issue progress.
 * Pause, continue, cancel, and resume a saved scan after reloading the page.
 * Provide translation-ready administrator, progress, evidence, JavaScript, and CSV strings through the WordPress.org text domain.
 
 The destination-impact view is derived from the completed occurrence rows. It does not make more HTTP requests. Two links to one destination in the same page count as two occurrences and one affected content item.
+
+The content-link coverage view is also derived from the exact completed scan without additional HTTP requests. “No incoming links detected in scanned content” means only that no links were found in the selected items' stored `post_content`; menus, templates, widgets, shortcode output, and rendered page-builder content are outside this evidence.
 
 Destination grouping normalizes scheme and host case, fragments, and default ports. Paths, query strings, schemes, non-default ports, and trailing slashes remain distinct because they can return different evidence.
 
@@ -50,7 +56,7 @@ The plugin does not create an account, call an IndexLane service, or add fronten
 
 == Limits ==
 
-Version 0.3 scans links found in the `post_content` field of selected public post types. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
+Version 0.4 scans links found in the `post_content` field of selected public post types. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
 
 Each AJAX batch makes at most five outbound HTTP requests. A session begins with an explicit allowance of 250 actual requests, including redirect hops. When that allowance is reached, the administrator can grant another 250 requests and continue without losing progress or recording incomplete evidence.
 
@@ -61,13 +67,13 @@ Each AJAX batch makes at most five outbound HTTP requests. A session begins with
 3. Go to `Tools -> Redirect & Internal Link Auditor`.
 4. Select the public content types and choose all published content or a numeric limit.
 5. Start the scan, keep the page open while it runs, or pause and return later.
-6. Export the destination-impact or detailed-row CSV report after the session completes.
+6. Review content-link coverage and export target-coverage, destination-impact, or detailed-row CSV reports after the session completes.
 
 == Frequently Asked Questions ==
 
 = Does this plugin change links or content? =
 
-No. Version 0.3 is read-only and diagnostic only.
+No. Version 0.4 is read-only and diagnostic only.
 
 = Does this plugin store scan results? =
 
@@ -85,9 +91,16 @@ No. Old, staging, and development-domain links are flagged but not fetched. A sa
 
 1. Scan setup with all-published-content scope and public post-type selection.
 2. A resumable scan session showing progress, request allowance, and lifecycle controls.
-3. Completed destination-impact and occurrence evidence with exact-session CSV exports.
+3. Completed content-link coverage with source status, direct/redirected evidence, target details, and exact-session CSV exports.
 
 == Changelog ==
+
+= 0.4.0 =
+
+* Added content-link coverage for every published content item in a completed scan.
+* Added incoming and outgoing counts, linking-source and destination counts, anchor variants, self-links, and direct-versus-redirected evidence.
+* Added target details, a zero-or-one-source filter, and resolution of redirects to their final published WordPress content item.
+* Added an exact-session target-coverage CSV export without additional HTTP requests.
 
 = 0.3.1 =
 

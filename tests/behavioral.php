@@ -203,7 +203,7 @@ indexlane_assert_same(
 			'handle'       => 'indexlane-rila-admin',
 			'src'          => 'https://example.test/wp-content/plugins/indexlane-redirect-internal-link-auditor/assets/admin.css',
 			'dependencies' => array(),
-			'version'      => '0.3.1',
+			'version'      => '0.4.0',
 		),
 	),
 	$GLOBALS['indexlane_test_styles'],
@@ -215,7 +215,7 @@ indexlane_assert_same(
 			'handle'       => 'indexlane-rila-admin',
 			'src'          => 'https://example.test/wp-content/plugins/indexlane-redirect-internal-link-auditor/assets/admin.js',
 			'dependencies' => array(),
-			'version'      => '0.3.1',
+			'version'      => '0.4.0',
 			'in_footer'    => true,
 		),
 	),
@@ -238,20 +238,24 @@ function indexlane_result_row(
 	string $warning,
 	string $result,
 	string $source_title = 'Source',
-	string $anchor_text = 'Link'
+	string $anchor_text = 'Link',
+	array $extra = array()
 ): array {
-	return array(
-		'source_title'    => $source_title,
-		'source_type'     => 'Page',
-		'source_url'      => $source_url,
-		'source_edit_url' => 'https://example.test/wp-admin/post.php?post=1&action=edit',
-		'linked_url'      => $linked_url,
-		'http_status'     => $http_status,
-		'redirect_count'  => $redirect_count,
-		'final_url'       => $final_url,
-		'warning'         => $warning,
-		'anchor_text'     => $anchor_text,
-		'result'          => $result,
+	return array_merge(
+		array(
+			'source_title'    => $source_title,
+			'source_type'     => 'Page',
+			'source_url'      => $source_url,
+			'source_edit_url' => 'https://example.test/wp-admin/post.php?post=1&action=edit',
+			'linked_url'      => $linked_url,
+			'http_status'     => $http_status,
+			'redirect_count'  => $redirect_count,
+			'final_url'       => $final_url,
+			'warning'         => $warning,
+			'anchor_text'     => $anchor_text,
+			'result'          => $result,
+		),
+		$extra
 	);
 }
 
@@ -472,6 +476,170 @@ indexlane_assert_same( "'\t@SUM(1,1)", indexlane_invoke( 'csv_safe', array( "\t@
 indexlane_assert_same( "'-2+3", indexlane_invoke( 'csv_safe', array( '-2+3' ) ), 'CSV safety should block minus-prefixed formulas.' );
 indexlane_assert_same( ' ordinary text', indexlane_invoke( 'csv_safe', array( ' ordinary text' ) ), 'CSV safety should not alter non-formula text.' );
 
+$coverage_items = array(
+	array(
+		'id'       => 1,
+		'title'    => 'Alpha target',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/alpha',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=1&action=edit',
+	),
+	array(
+		'id'       => 2,
+		'title'    => 'Source one',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/source-one',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=2&action=edit',
+	),
+	array(
+		'id'       => 3,
+		'title'    => 'Source two',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/source-two',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=3&action=edit',
+	),
+	array(
+		'id'       => 4,
+		'title'    => 'Lonely target',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/lonely',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=4&action=edit',
+	),
+	array(
+		'id'       => 5,
+		'title'    => 'Self target',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/self',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=5&action=edit',
+	),
+);
+
+$coverage_results = array(
+	indexlane_result_row(
+		'https://example.test/source-one',
+		'https://example.test/alpha',
+		'200',
+		0,
+		'https://example.test/alpha',
+		'None',
+		'OK',
+		'Source one',
+		'Alpha guide',
+		array( 'source_id' => 2, 'is_same_site' => true, 'coverage_target_id' => 1, 'link_kind_code' => 'direct' )
+	),
+	indexlane_result_row(
+		'https://example.test/source-one',
+		'https://example.test/alpha',
+		'200',
+		0,
+		'https://example.test/alpha',
+		'None',
+		'OK',
+		'Source one',
+		'Read alpha',
+		array( 'source_id' => 2, 'is_same_site' => true, 'coverage_target_id' => 1, 'link_kind_code' => 'direct' )
+	),
+	indexlane_result_row(
+		'https://example.test/source-two',
+		'https://example.test/old-alpha',
+		'301 -> 200',
+		1,
+		'https://example.test/alpha',
+		'Redirect (301)',
+		'Warning',
+		'Source two',
+		'Legacy alpha',
+		array( 'source_id' => 3, 'is_same_site' => true, 'coverage_target_id' => 1, 'link_kind_code' => 'redirected' )
+	),
+	indexlane_result_row(
+		'https://example.test/source-one',
+		'https://example.test/source-two',
+		'200',
+		0,
+		'https://example.test/source-two',
+		'None',
+		'OK',
+		'Source one',
+		'Other source',
+		array( 'source_id' => 2, 'is_same_site' => true, 'coverage_target_id' => 3, 'link_kind_code' => 'direct' )
+	),
+	indexlane_result_row(
+		'https://example.test/self',
+		'https://example.test/self',
+		'200',
+		0,
+		'https://example.test/self',
+		'None',
+		'OK',
+		'Self target',
+		'On this page',
+		array( 'source_id' => 5, 'is_same_site' => true, 'coverage_target_id' => 5, 'link_kind_code' => 'direct' )
+	),
+	indexlane_result_row(
+		'https://example.test/source-two',
+		'https://example.test/broken-destination',
+		'404',
+		0,
+		'https://example.test/broken-destination',
+		'Broken link (404)',
+		'Error',
+		'Source two',
+		'Broken destination',
+		array( 'source_id' => 3, 'is_same_site' => true, 'coverage_target_id' => 0, 'link_kind_code' => 'direct' )
+	),
+	indexlane_result_row(
+		'https://example.test/source-two',
+		'https://legacy.example/path',
+		'',
+		0,
+		'',
+		'Old domain',
+		'Needs review',
+		'Source two',
+		'Legacy site',
+		array( 'source_id' => 3, 'is_same_site' => false, 'coverage_target_id' => 0, 'link_kind_code' => 'direct' )
+	),
+);
+
+$http_calls_before_coverage = count( $GLOBALS['indexlane_test_http_calls'] );
+$coverage_rows              = indexlane_invoke( 'build_content_link_coverage', array( $coverage_items, $coverage_results ) );
+indexlane_assert_same( $http_calls_before_coverage, count( $GLOBALS['indexlane_test_http_calls'] ), 'Coverage aggregation must not make HTTP requests.' );
+indexlane_assert_same( 5, count( $coverage_rows ), 'Coverage must contain one row for every item in the saved scanned corpus.' );
+$coverage_by_id = array_column( $coverage_rows, null, 'target_id' );
+indexlane_assert_same( 3, $coverage_by_id[1]['incoming_occurrences'], 'Every direct and redirected occurrence should count toward its final target.' );
+indexlane_assert_same( 2, $coverage_by_id[1]['linking_source_count'], 'Repeated links from one source should count as one linking content item.' );
+indexlane_assert_same( array( 'Alpha guide', 'Legacy alpha', 'Read alpha' ), $coverage_by_id[1]['anchor_text_variants'], 'Target rows should retain every distinct anchor-text variant deterministically.' );
+indexlane_assert_same( 2, $coverage_by_id[1]['direct_incoming'], 'Direct incoming links should remain distinguishable.' );
+indexlane_assert_same( 1, $coverage_by_id[1]['redirected_incoming'], 'A redirect to a published target should count toward the final item.' );
+indexlane_assert_same( 'redirected', $coverage_by_id[1]['incoming_details'][2]['link_kind_code'], 'Target detail evidence should retain the redirect classification.' );
+indexlane_assert_same( 'https://example.test/old-alpha', $coverage_by_id[1]['incoming_details'][2]['linked_url'], 'Target detail evidence should retain the originally linked redirect URL.' );
+indexlane_assert_same( 'https://example.test/alpha', $coverage_by_id[1]['incoming_details'][2]['final_url'], 'Target detail evidence should retain the published final URL.' );
+indexlane_assert_same( 3, $coverage_by_id[2]['outgoing_internal_occurrences'], 'Outgoing coverage should count every same-site occurrence from the source.' );
+indexlane_assert_same( 2, $coverage_by_id[2]['distinct_internal_destinations'], 'Repeated outgoing links to one destination should be deduplicated.' );
+indexlane_assert_same( 2, $coverage_by_id[3]['outgoing_internal_occurrences'], 'Outgoing coverage should include published and unresolved same-site destinations.' );
+indexlane_assert_same( 1, $coverage_by_id[5]['self_link_count'], 'Self-links should be counted explicitly.' );
+indexlane_assert_same( 'No incoming links detected in scanned content.', $coverage_by_id[4]['status'], 'Zero-source content must use conservative scanned-content wording.' );
+indexlane_assert_same( 'One linking source', $coverage_by_id[3]['status'], 'One-source content should have the planned status.' );
+indexlane_assert_same( 'Multiple linking sources', $coverage_by_id[1]['status'], 'Multi-source content should have the planned status.' );
+
+$coverage_csv = indexlane_invoke( 'build_csv_rows', array( $coverage_results, 'coverage', $coverage_items ) );
+indexlane_assert_same( 6, count( $coverage_csv ), 'The target-coverage CSV should contain every scanned item plus its header.' );
+indexlane_assert_same( 'Target Title', $coverage_csv[0][0], 'The dedicated coverage CSV should start with the target title.' );
+$alpha_csv_rows = array_values(
+	array_filter(
+		$coverage_csv,
+		static function ( array $row ): bool {
+			return isset( $row[0] ) && 'Alpha target' === $row[0];
+		}
+	)
+);
+indexlane_assert_same( 1, count( $alpha_csv_rows ), 'The coverage CSV should contain exactly one Alpha target row.' );
+indexlane_assert_same(
+	array( '3', '2', '0', '0', 'Alpha guide | Legacy alpha | Read alpha', '0', '2', '1', 'Multiple linking sources' ),
+	array_slice( $alpha_csv_rows[0], 2, 9 ),
+	'The coverage CSV should export exact incoming, outgoing, anchor, self-link, and direct/redirect metrics.'
+);
+
 $GLOBALS['indexlane_test_http_calls'] = array();
 $GLOBALS['indexlane_test_responses']  = array(
 	'https://example.test/foo'  => indexlane_response( 301, '/foo/' ),
@@ -530,7 +698,7 @@ for ( $i = 1; $i <= 6; $i++ ) {
 }
 
 $batch_session = array(
-	'schema_version'   => 1,
+	'schema_version'   => 2,
 	'id'               => '12345678-1234-4abc-8def-000000000010',
 	'status'           => 'running',
 	'created_at'       => time(),
@@ -541,6 +709,7 @@ $batch_session = array(
 	'content_done'     => true,
 	'request_limit'    => 250,
 	'stats'            => indexlane_invoke( 'empty_stats' ),
+	'content_items'    => array(),
 	'results'          => array(),
 	'checked_urls'     => array(),
 	'pending_checks'   => $pending_checks,

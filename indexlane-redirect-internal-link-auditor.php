@@ -2,8 +2,8 @@
 /**
  * Plugin Name: IndexLane Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
- * Description: Find broken, redirected, old-domain, and staging-domain links inside WordPress content.
- * Version: 0.3.1
+ * Description: Audit redirects, broken links, and content link coverage inside WordPress.
+ * Version: 0.4.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -24,12 +24,12 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	 * Admin-only internal link and redirect diagnostic helper.
 	 */
 	final class IndexLane_Redirect_Internal_Link_Auditor {
-		private const VERSION                         = '0.3.1';
+		private const VERSION                         = '0.4.0';
 		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY                      = 'manage_options';
 		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';
 		private const NONCE_NAME                      = 'indexlane_rila_nonce';
-		private const SESSION_SCHEMA_VERSION          = 1;
+		private const SESSION_SCHEMA_VERSION          = 2;
 		private const SESSION_TRANSIENT_PREFIX        = 'indexlane_rila_session_';
 		private const SESSION_LIFETIME                = 86400;
 		private const INITIAL_REQUEST_ALLOWANCE       = 250;
@@ -132,7 +132,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			}
 
 			$action = isset( $_POST['indexlane_rila_action'] ) ? sanitize_key( wp_unslash( $_POST['indexlane_rila_action'] ) ) : '';
-			if ( ! in_array( $action, array( 'export_details', 'export_impact' ), true ) ) {
+			if ( ! in_array( $action, array( 'export_details', 'export_impact', 'export_coverage' ), true ) ) {
 				return;
 			}
 
@@ -147,8 +147,15 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				wp_die( esc_html__( 'The completed scan is unavailable or has expired. Complete the scan again before exporting.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 
-			$report_type = 'export_impact' === $action ? 'impact' : 'details';
-			self::send_csv( $session['results'], $report_type );
+			if ( 'export_coverage' === $action ) {
+				$report_type = 'coverage';
+			} elseif ( 'export_impact' === $action ) {
+				$report_type = 'impact';
+			} else {
+				$report_type = 'details';
+			}
+
+			self::send_csv( $session['results'], $report_type, isset( $session['content_items'] ) && is_array( $session['content_items'] ) ? $session['content_items'] : array() );
 		}
 
 		/**
@@ -327,7 +334,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				<h1><?php esc_html_e( 'Redirect & Internal Link Auditor', 'indexlane-redirect-internal-link-auditor' ); ?></h1>
 
 				<p>
-					<?php esc_html_e( 'Find internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains.', 'indexlane-redirect-internal-link-auditor' ); ?>
+					<?php esc_html_e( 'Find broken, redirected, old-domain, and staging-domain links, then review internal-link coverage across the scanned content.', 'indexlane-redirect-internal-link-auditor' ); ?>
 				</p>
 
 				<?php self::render_session_panel( is_array( $session ) ? self::build_session_summary( $session ) : null ); ?>
@@ -510,8 +517,12 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		 * @param array<string,mixed> $scan Scan data.
 		 */
 		private static function render_results( array $scan ): void {
-			$stats   = $scan['stats'];
-			$results = $scan['results'];
+			$stats          = $scan['stats'];
+			$results        = $scan['results'];
+			$content_items  = isset( $scan['content_items'] ) && is_array( $scan['content_items'] ) ? $scan['content_items'] : array();
+			$coverage_rows  = self::build_content_link_coverage( $content_items, $results );
+			$coverage_filter = self::current_coverage_filter();
+			$coverage_target = self::current_coverage_target();
 			?>
 			<div id="indexlane-rila-results" class="indexlane-rila-results">
 				<h2><?php esc_html_e( 'Completed scan evidence', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
@@ -536,10 +547,13 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-export-actions">
 					<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
 					<input type="hidden" name="session_id" value="<?php echo esc_attr( (string) $scan['id'] ); ?>" />
+					<button type="submit" name="indexlane_rila_action" value="export_coverage" class="button"><?php esc_html_e( 'Export target coverage as CSV', 'indexlane-redirect-internal-link-auditor' ); ?></button>
 					<button type="submit" name="indexlane_rila_action" value="export_details" class="button"><?php esc_html_e( 'Export detailed rows as CSV', 'indexlane-redirect-internal-link-auditor' ); ?></button>
 					<button type="submit" name="indexlane_rila_action" value="export_impact" class="button"><?php esc_html_e( 'Export destination impact as CSV', 'indexlane-redirect-internal-link-auditor' ); ?></button>
-					<span class="description"><?php esc_html_e( 'Both exports use this exact completed session without additional HTTP requests. The temporary session expires after 24 hours of inactivity.', 'indexlane-redirect-internal-link-auditor' ); ?></span>
+					<span class="description"><?php esc_html_e( 'All exports use this exact completed session without additional HTTP requests. The temporary session expires after 24 hours of inactivity.', 'indexlane-redirect-internal-link-auditor' ); ?></span>
 				</form>
+
+				<?php self::render_content_link_coverage( $coverage_rows, $coverage_filter, $coverage_target ); ?>
 
 				<?php if ( empty( $results ) ) : ?>
 					<p><?php esc_html_e( 'No internal, old-domain, or staging/development-domain content links were found in the scanned content.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
@@ -655,6 +669,304 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			</table>
 			</div>
 			<?php
+		}
+
+		/**
+		 * Render the destination-oriented coverage report for the scanned corpus.
+		 *
+		 * @param array<int,array<string,mixed>> $coverage_rows Coverage rows.
+		 * @param string                         $filter        Coverage filter.
+		 * @param int                            $target_id     Selected target detail ID.
+		 */
+		private static function render_content_link_coverage( array $coverage_rows, string $filter, int $target_id ): void {
+			$filtered_rows = array_values(
+				array_filter(
+					$coverage_rows,
+					static function ( array $row ) use ( $filter ): bool {
+						return 'attention' !== $filter || (int) $row['linking_source_count'] <= 1;
+					}
+				)
+			);
+			$target_detail = null;
+			foreach ( $coverage_rows as $coverage_row ) {
+				if ( (int) $coverage_row['target_id'] === $target_id ) {
+					$target_detail = $coverage_row;
+					break;
+				}
+			}
+			?>
+			<section class="indexlane-rila-coverage" aria-labelledby="indexlane-rila-coverage-heading">
+				<h2 id="indexlane-rila-coverage-heading"><?php esc_html_e( 'Content link coverage', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
+				<p class="description">
+					<?php esc_html_e( 'One row per scanned published content item, derived from the saved occurrence evidence. Redirects to a published WordPress URL count toward the final item while retaining redirect evidence.', 'indexlane-redirect-internal-link-auditor' ); ?>
+				</p>
+				<p class="indexlane-rila-evidence-scope">
+					<?php esc_html_e( 'Coverage includes links found in scanned post content. It does not include menus, templates, widgets, shortcode output, or rendered page-builder content.', 'indexlane-redirect-internal-link-auditor' ); ?>
+				</p>
+
+				<?php if ( is_array( $target_detail ) ) : ?>
+					<?php self::render_content_link_coverage_detail( $target_detail, $filter ); ?>
+				<?php endif; ?>
+
+				<?php if ( empty( $coverage_rows ) ) : ?>
+					<p><?php esc_html_e( 'No published content items were included in this completed scan.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+				</section>
+					<?php return; ?>
+				<?php endif; ?>
+
+				<form method="get" action="<?php echo esc_url( admin_url( 'tools.php' ) ); ?>" class="indexlane-rila-coverage-filter">
+					<input type="hidden" name="page" value="<?php echo esc_attr( self::SLUG ); ?>" />
+					<label for="indexlane-rila-coverage-filter">
+						<?php esc_html_e( 'Show', 'indexlane-redirect-internal-link-auditor' ); ?>
+					</label>
+					<select id="indexlane-rila-coverage-filter" name="coverage_filter">
+						<option value="all" <?php selected( 'all', $filter ); ?>><?php esc_html_e( 'All scanned content', 'indexlane-redirect-internal-link-auditor' ); ?></option>
+						<option value="attention" <?php selected( 'attention', $filter ); ?>><?php esc_html_e( 'Zero or one linking source', 'indexlane-redirect-internal-link-auditor' ); ?></option>
+					</select>
+					<button type="submit" class="button"><?php esc_html_e( 'Apply filter', 'indexlane-redirect-internal-link-auditor' ); ?></button>
+					<span class="description">
+						<?php
+						echo esc_html(
+							sprintf(
+								/* translators: 1: visible content item count, 2: total scanned content item count */
+								__( 'Showing %1$d of %2$d content items.', 'indexlane-redirect-internal-link-auditor' ),
+								count( $filtered_rows ),
+								count( $coverage_rows )
+							)
+						);
+						?>
+					</span>
+				</form>
+
+				<?php if ( empty( $filtered_rows ) ) : ?>
+					<p><?php esc_html_e( 'No content items match this coverage filter.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+				</section>
+					<?php return; ?>
+				<?php endif; ?>
+
+				<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Content link coverage', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
+					<table class="widefat striped indexlane-rila-coverage-table">
+						<thead>
+							<tr>
+								<th scope="col"><?php esc_html_e( 'Target content', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Incoming occurrences', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Linking content items', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Outgoing occurrences', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Internal destinations', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Anchor-text variants', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Self-links', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Direct incoming', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Redirected incoming', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Status', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Details', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $filtered_rows as $row ) : ?>
+								<tr>
+									<td class="indexlane-rila-target-cell">
+										<strong>
+											<?php if ( '' !== $row['target_edit_url'] ) : ?>
+												<a href="<?php echo esc_url( $row['target_edit_url'] ); ?>"><?php echo esc_html( $row['target_title'] ); ?></a>
+											<?php else : ?>
+												<?php echo esc_html( $row['target_title'] ); ?>
+											<?php endif; ?>
+										</strong>
+										<?php if ( '' !== $row['target_type'] ) : ?>
+											<span class="indexlane-rila-target-type"><?php echo esc_html( $row['target_type'] ); ?></span>
+										<?php endif; ?>
+										<?php if ( '' !== $row['target_url'] ) : ?>
+											<a class="indexlane-rila-target-url" href="<?php echo esc_url( $row['target_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['target_url'] ); ?></a>
+										<?php endif; ?>
+									</td>
+									<td><?php echo esc_html( (string) $row['incoming_occurrences'] ); ?></td>
+									<td><?php echo esc_html( (string) $row['linking_source_count'] ); ?></td>
+									<td><?php echo esc_html( (string) $row['outgoing_internal_occurrences'] ); ?></td>
+									<td><?php echo esc_html( (string) $row['distinct_internal_destinations'] ); ?></td>
+									<td><?php self::render_anchor_text_variants( $row['anchor_text_variants'] ); ?></td>
+									<td><?php echo esc_html( (string) $row['self_link_count'] ); ?></td>
+									<td><?php echo esc_html( (string) $row['direct_incoming'] ); ?></td>
+									<td><?php echo esc_html( (string) $row['redirected_incoming'] ); ?></td>
+									<td><span class="indexlane-rila-coverage-status is-<?php echo esc_attr( $row['status_code'] ); ?>"><?php echo esc_html( $row['status'] ); ?></span></td>
+									<td>
+										<a class="button button-small" href="<?php echo esc_url( self::coverage_report_url( $filter, (int) $row['target_id'] ) . '#indexlane-rila-target-detail' ); ?>">
+											<?php esc_html_e( 'View sources and anchors', 'indexlane-redirect-internal-link-auditor' ); ?>
+										</a>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+			</section>
+			<?php
+		}
+
+		/**
+		 * Render all saved incoming-link evidence for one selected target.
+		 *
+		 * @param array<string,mixed> $target Coverage target row.
+		 * @param string              $filter Active coverage filter.
+		 */
+		private static function render_content_link_coverage_detail( array $target, string $filter ): void {
+			?>
+			<section id="indexlane-rila-target-detail" class="indexlane-rila-target-detail" aria-labelledby="indexlane-rila-target-detail-heading" tabindex="-1">
+				<div class="indexlane-rila-target-detail-heading">
+					<div>
+						<h3 id="indexlane-rila-target-detail-heading">
+							<?php
+							echo esc_html(
+								sprintf(
+									/* translators: %s: target content title */
+									__( 'Incoming link details: %s', 'indexlane-redirect-internal-link-auditor' ),
+									$target['target_title']
+								)
+							);
+							?>
+						</h3>
+						<?php if ( '' !== $target['target_url'] ) : ?>
+							<a href="<?php echo esc_url( $target['target_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $target['target_url'] ); ?></a>
+						<?php endif; ?>
+					</div>
+					<a class="button" href="<?php echo esc_url( self::coverage_report_url( $filter ) . '#indexlane-rila-coverage-heading' ); ?>"><?php esc_html_e( 'Close target details', 'indexlane-redirect-internal-link-auditor' ); ?></a>
+				</div>
+
+				<p><span class="indexlane-rila-coverage-status is-<?php echo esc_attr( $target['status_code'] ); ?>"><?php echo esc_html( $target['status'] ); ?></span></p>
+
+				<?php if ( empty( $target['incoming_details'] ) ) : ?>
+					<p><?php esc_html_e( 'No incoming links detected in scanned content.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+					<p class="description"><?php esc_html_e( 'This is limited to links found in the scanned content fields; other sitewide link sources may exist.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+			</section>
+					<?php return; ?>
+				<?php endif; ?>
+
+				<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Incoming source and anchor details', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
+					<table class="widefat striped indexlane-rila-target-detail-table">
+						<thead>
+							<tr>
+								<th scope="col"><?php esc_html_e( 'Source content', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Anchor text', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Connection', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'HTTP status evidence', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th scope="col"><?php esc_html_e( 'Final URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $target['incoming_details'] as $detail ) : ?>
+								<tr>
+									<td>
+										<?php if ( '' !== $detail['source_edit_url'] ) : ?>
+											<a href="<?php echo esc_url( $detail['source_edit_url'] ); ?>"><?php echo esc_html( $detail['source_title'] ); ?></a>
+										<?php else : ?>
+											<?php echo esc_html( $detail['source_title'] ); ?>
+										<?php endif; ?>
+										<?php if ( '' !== $detail['source_url'] ) : ?>
+											<a class="indexlane-rila-target-url" href="<?php echo esc_url( $detail['source_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $detail['source_url'] ); ?></a>
+										<?php endif; ?>
+									</td>
+									<td><?php echo esc_html( $detail['anchor_text'] ); ?></td>
+									<td>
+										<?php echo esc_html( self::coverage_link_kind_label( $detail['link_kind_code'] ) ); ?>
+										<?php if ( ! empty( $detail['is_self_link'] ) ) : ?>
+											<span class="indexlane-rila-self-link"><?php esc_html_e( 'Self-link', 'indexlane-redirect-internal-link-auditor' ); ?></span>
+										<?php endif; ?>
+									</td>
+									<td><a href="<?php echo esc_url( $detail['linked_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $detail['linked_url'] ); ?></a></td>
+									<td><?php echo '' !== $detail['http_status'] ? esc_html( $detail['http_status'] ) : '&mdash;'; ?></td>
+									<td>
+										<?php if ( 'redirected' === $detail['link_kind_code'] && '' !== $detail['final_url'] ) : ?>
+											<a href="<?php echo esc_url( $detail['final_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $detail['final_url'] ); ?></a>
+										<?php else : ?>
+											&mdash;
+										<?php endif; ?>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+				</div>
+			</section>
+			<?php
+		}
+
+		/**
+		 * Render the distinct anchor-text evidence stored for a target row.
+		 *
+		 * @param array<int,string> $variants Anchor variants.
+		 */
+		private static function render_anchor_text_variants( array $variants ): void {
+			if ( empty( $variants ) ) {
+				echo '&mdash;';
+				return;
+			}
+
+			if ( 1 === count( $variants ) ) {
+				echo esc_html( $variants[0] );
+				return;
+			}
+			?>
+			<details class="indexlane-rila-anchor-variants">
+				<summary>
+					<?php
+					echo esc_html(
+						sprintf(
+							/* translators: %d: number of distinct anchor-text variants */
+							__( '%d anchor variants', 'indexlane-redirect-internal-link-auditor' ),
+							count( $variants )
+						)
+					);
+					?>
+				</summary>
+				<ul>
+					<?php foreach ( $variants as $variant ) : ?>
+						<li><?php echo esc_html( $variant ); ?></li>
+					<?php endforeach; ?>
+				</ul>
+			</details>
+			<?php
+		}
+
+		/**
+		 * Read the active read-only coverage filter.
+		 */
+		private static function current_coverage_filter(): string {
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This only filters a saved read-only report.
+			$filter = isset( $_GET['coverage_filter'] ) ? sanitize_key( wp_unslash( $_GET['coverage_filter'] ) ) : '';
+
+			return 'attention' === $filter ? 'attention' : 'all';
+		}
+
+		/**
+		 * Read the selected read-only target detail ID.
+		 */
+		private static function current_coverage_target(): int {
+			// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- This only selects detail from a saved read-only report.
+			return isset( $_GET['coverage_target'] ) ? absint( wp_unslash( $_GET['coverage_target'] ) ) : 0;
+		}
+
+		/**
+		 * Build a URL for the coverage filter and optional target detail.
+		 */
+		private static function coverage_report_url( string $filter, int $target_id = 0 ): string {
+			$args = array();
+			if ( 'attention' === $filter ) {
+				$args['coverage_filter'] = 'attention';
+			}
+			if ( $target_id > 0 ) {
+				$args['coverage_target'] = $target_id;
+			}
+
+			return empty( $args ) ? self::admin_page_url() : add_query_arg( $args, self::admin_page_url() );
+		}
+
+		/**
+		 * Translate the stable direct-versus-redirected evidence code.
+		 */
+		private static function coverage_link_kind_label( string $code ): string {
+			return 'redirected' === $code
+				? __( 'Redirected', 'indexlane-redirect-internal-link-auditor' )
+				: __( 'Direct', 'indexlane-redirect-internal-link-auditor' );
 		}
 
 		/**
@@ -779,6 +1091,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				'content_done'       => 0 === $total,
 				'request_limit'      => self::INITIAL_REQUEST_ALLOWANCE,
 				'stats'              => self::empty_stats(),
+				'content_items'      => array(),
 				'results'            => array(),
 				'checked_urls'       => array(),
 				'pending_checks'      => array(),
@@ -921,18 +1234,20 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		private static function process_content_item( array $session, $post ): array {
 			$session['stats']['content_items_processed']++;
 			$source_url = get_permalink( $post );
+			$source     = array(
+				'id'       => (int) $post->ID,
+				'title'    => get_the_title( $post ),
+				'type'     => self::get_post_type_label( (string) $post->post_type ),
+				'url'      => $source_url ? (string) $source_url : '',
+				'edit_url' => (string) get_edit_post_link( $post->ID, '' ),
+			);
+			$session['content_items'][] = $source;
+
 			if ( ! $source_url ) {
 				return $session;
 			}
 
-			$source = array(
-				'id'       => (int) $post->ID,
-				'title'    => get_the_title( $post ),
-				'type'     => self::get_post_type_label( (string) $post->post_type ),
-				'url'      => (string) $source_url,
-				'edit_url' => get_edit_post_link( $post->ID, '' ),
-			);
-			$links  = self::extract_links( (string) $post->post_content );
+			$links = self::extract_links( (string) $post->post_content );
 			$session['stats']['links_extracted'] += count( $links );
 
 			$current_host = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
@@ -1557,20 +1872,76 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 				$result_code = self::result_code_from_label( $result );
 			}
 
+			$redirect_count_value = is_numeric( $redirect_count ) ? max( 0, (int) $redirect_count ) : 0;
+			$is_same_site         = self::is_same_site_url( $linked_url );
+			$direct_target_id      = $is_same_site ? self::published_content_id_for_url( $linked_url ) : 0;
+			$final_target_id       = $redirect_count_value > 0 && self::is_same_site_url( $final_url )
+				? self::published_content_id_for_url( $final_url )
+				: 0;
+			$coverage_target_id    = $redirect_count_value > 0 ? $final_target_id : $direct_target_id;
+
 			return array(
-				'source_title'    => $source['title'],
-				'source_type'     => $source['type'],
-				'source_url'      => $source['url'],
-				'source_edit_url' => $source['edit_url'],
-				'linked_url'      => $linked_url,
-				'http_status'     => $http_status,
-				'redirect_count'  => $redirect_count,
-				'final_url'       => $final_url,
-				'warning'         => $warning,
-				'anchor_text'     => $link['anchor'],
-				'result'          => $result,
-				'result_code'     => $result_code,
+				'source_id'          => isset( $source['id'] ) ? max( 0, (int) $source['id'] ) : 0,
+				'source_title'       => $source['title'],
+				'source_type'        => $source['type'],
+				'source_url'         => $source['url'],
+				'source_edit_url'    => $source['edit_url'],
+				'linked_url'         => $linked_url,
+				'http_status'        => $http_status,
+				'redirect_count'     => $redirect_count_value,
+				'final_url'          => $final_url,
+				'warning'            => $warning,
+				'anchor_text'        => $link['anchor'],
+				'result'             => $result,
+				'result_code'        => $result_code,
+				'is_same_site'       => $is_same_site,
+				'direct_target_id'   => $direct_target_id,
+				'final_target_id'    => $final_target_id,
+				'coverage_target_id' => $coverage_target_id,
+				'link_kind_code'     => $redirect_count_value > 0 ? 'redirected' : 'direct',
 			);
+		}
+
+		/**
+		 * Determine whether a URL belongs to the current site without requesting it.
+		 */
+		private static function is_same_site_url( string $url ): bool {
+			$url_host     = self::normalize_host( (string) wp_parse_url( $url, PHP_URL_HOST ) );
+			$current_host = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
+
+			return self::hosts_match( $url_host, $current_host );
+		}
+
+		/**
+		 * Resolve a same-site URL to a currently published, viewable WordPress item.
+		 *
+		 * This uses local WordPress routing data and never performs an HTTP request.
+		 */
+		private static function published_content_id_for_url( string $url ): int {
+			if ( ! self::is_same_site_url( $url ) || ! function_exists( 'url_to_postid' ) ) {
+				return 0;
+			}
+
+			$post_id = (int) url_to_postid( $url );
+			if ( $post_id <= 0 || ! function_exists( 'get_post' ) ) {
+				return 0;
+			}
+
+			$post = get_post( $post_id );
+			if ( ! $post || 'publish' !== $post->post_status ) {
+				return 0;
+			}
+
+			$post_type_object = get_post_type_object( (string) $post->post_type );
+			if ( ! $post_type_object ) {
+				return 0;
+			}
+
+			$is_viewable = function_exists( 'is_post_type_viewable' )
+				? is_post_type_viewable( $post_type_object )
+				: ! empty( $post_type_object->publicly_queryable ) || ! empty( $post_type_object->public );
+
+			return $is_viewable ? $post_id : 0;
 		}
 
 		/**
@@ -1802,6 +2173,253 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		}
 
 		/**
+		 * Build one content-link coverage row for every item in the saved scan corpus.
+		 *
+		 * This is a local projection of the saved content snapshot and occurrence
+		 * evidence. It never makes an HTTP request or queries a different corpus.
+		 *
+		 * @param array<int,array<string,mixed>> $content_items Saved scanned items.
+		 * @param array<int,array<string,mixed>> $results       Saved occurrence rows.
+		 * @return array<int,array<string,mixed>>
+		 */
+		private static function build_content_link_coverage( array $content_items, array $results ): array {
+			$coverage  = array();
+			$url_to_id = array();
+
+			foreach ( $content_items as $item ) {
+				$target_id = isset( $item['id'] ) ? max( 0, (int) $item['id'] ) : 0;
+				if ( $target_id <= 0 || isset( $coverage[ $target_id ] ) ) {
+					continue;
+				}
+
+				$title = isset( $item['title'] ) ? trim( (string) $item['title'] ) : '';
+				$url   = isset( $item['url'] ) ? trim( (string) $item['url'] ) : '';
+				$coverage[ $target_id ] = array(
+					'target_id'                      => $target_id,
+					'target_title'                   => '' !== $title ? $title : __( '(no title)', 'indexlane-redirect-internal-link-auditor' ),
+					'target_type'                    => isset( $item['type'] ) ? (string) $item['type'] : '',
+					'target_url'                     => $url,
+					'target_edit_url'                => isset( $item['edit_url'] ) ? (string) $item['edit_url'] : '',
+					'incoming_occurrences'           => 0,
+					'linking_source_count'           => 0,
+					'outgoing_internal_occurrences'  => 0,
+					'distinct_internal_destinations' => 0,
+					'anchor_text_variants'           => array(),
+					'self_link_count'                => 0,
+					'direct_incoming'                => 0,
+					'redirected_incoming'            => 0,
+					'status_code'                    => 'none',
+					'status'                         => '',
+					'incoming_details'               => array(),
+					'_linking_sources'                => array(),
+					'_outgoing_destinations'          => array(),
+					'_anchor_text_variants'           => array(),
+				);
+
+				$url_key = self::normalize_destination_for_impact( $url );
+				if ( '' !== $url_key ) {
+					$url_to_id[ $url_key ] = $target_id;
+				}
+			}
+
+			foreach ( $results as $row ) {
+				if ( ! self::coverage_result_is_same_site( $row ) ) {
+					continue;
+				}
+
+				$source_id = self::coverage_source_id_for_result( $row, $coverage, $url_to_id );
+				if ( $source_id > 0 && isset( $coverage[ $source_id ] ) ) {
+					$coverage[ $source_id ]['outgoing_internal_occurrences']++;
+					$destination_key = self::coverage_destination_key_for_result( $row );
+					if ( '' !== $destination_key ) {
+						$coverage[ $source_id ]['_outgoing_destinations'][ $destination_key ] = true;
+					}
+				}
+
+				$target_id = self::coverage_target_id_for_result( $row, $coverage, $url_to_id );
+				if ( $target_id <= 0 || ! isset( $coverage[ $target_id ] ) ) {
+					continue;
+				}
+
+				$redirect_count = isset( $row['redirect_count'] ) && is_numeric( $row['redirect_count'] )
+					? max( 0, (int) $row['redirect_count'] )
+					: 0;
+				$is_redirected  = $redirect_count > 0 || ( isset( $row['link_kind_code'] ) && 'redirected' === $row['link_kind_code'] );
+				$source_key     = $source_id > 0
+					? 'id:' . $source_id
+					: self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+				if ( '' === $source_key ) {
+					$source_key = 'source:' . ( isset( $row['source_title'] ) ? (string) $row['source_title'] : '' );
+				}
+
+				$anchor_text = isset( $row['anchor_text'] ) ? trim( (string) $row['anchor_text'] ) : '';
+				if ( '' === $anchor_text ) {
+					$anchor_text = __( '(empty anchor)', 'indexlane-redirect-internal-link-auditor' );
+				}
+
+				$coverage[ $target_id ]['incoming_occurrences']++;
+				$coverage[ $target_id ]['_linking_sources'][ $source_key ] = true;
+				$coverage[ $target_id ]['_anchor_text_variants'][ $anchor_text ] = true;
+				if ( $is_redirected ) {
+					$coverage[ $target_id ]['redirected_incoming']++;
+				} else {
+					$coverage[ $target_id ]['direct_incoming']++;
+				}
+				if ( $source_id > 0 && $source_id === $target_id ) {
+					$coverage[ $target_id ]['self_link_count']++;
+				}
+
+				$coverage[ $target_id ]['incoming_details'][] = array(
+					'source_id'       => $source_id,
+					'source_title'    => isset( $row['source_title'] ) ? (string) $row['source_title'] : '',
+					'source_type'     => isset( $row['source_type'] ) ? (string) $row['source_type'] : '',
+					'source_url'      => isset( $row['source_url'] ) ? (string) $row['source_url'] : '',
+					'source_edit_url' => isset( $row['source_edit_url'] ) ? (string) $row['source_edit_url'] : '',
+					'anchor_text'     => $anchor_text,
+					'link_kind_code'  => $is_redirected ? 'redirected' : 'direct',
+					'linked_url'      => isset( $row['linked_url'] ) ? (string) $row['linked_url'] : '',
+					'http_status'     => isset( $row['http_status'] ) ? (string) $row['http_status'] : '',
+					'redirect_count'  => $redirect_count,
+					'final_url'       => isset( $row['final_url'] ) ? (string) $row['final_url'] : '',
+					'is_self_link'    => $source_id > 0 && $source_id === $target_id,
+				);
+			}
+
+			foreach ( $coverage as &$coverage_row ) {
+				$coverage_row['linking_source_count']           = count( $coverage_row['_linking_sources'] );
+				$coverage_row['distinct_internal_destinations'] = count( $coverage_row['_outgoing_destinations'] );
+				$coverage_row['anchor_text_variants']           = array_keys( $coverage_row['_anchor_text_variants'] );
+				natcasesort( $coverage_row['anchor_text_variants'] );
+				$coverage_row['anchor_text_variants'] = array_values( $coverage_row['anchor_text_variants'] );
+
+				if ( 0 === $coverage_row['linking_source_count'] ) {
+					$coverage_row['status_code'] = 'none';
+					$coverage_row['status']      = __( 'No incoming links detected in scanned content.', 'indexlane-redirect-internal-link-auditor' );
+				} elseif ( 1 === $coverage_row['linking_source_count'] ) {
+					$coverage_row['status_code'] = 'one';
+					$coverage_row['status']      = __( 'One linking source', 'indexlane-redirect-internal-link-auditor' );
+				} else {
+					$coverage_row['status_code'] = 'multiple';
+					$coverage_row['status']      = __( 'Multiple linking sources', 'indexlane-redirect-internal-link-auditor' );
+				}
+
+				usort(
+					$coverage_row['incoming_details'],
+					static function ( array $left, array $right ): int {
+						$title_comparison = strnatcasecmp( $left['source_title'], $right['source_title'] );
+						if ( 0 !== $title_comparison ) {
+							return $title_comparison;
+						}
+
+						$anchor_comparison = strnatcasecmp( $left['anchor_text'], $right['anchor_text'] );
+						if ( 0 !== $anchor_comparison ) {
+							return $anchor_comparison;
+						}
+
+						return strcmp( $left['linked_url'], $right['linked_url'] );
+					}
+				);
+
+				unset( $coverage_row['_linking_sources'], $coverage_row['_outgoing_destinations'], $coverage_row['_anchor_text_variants'] );
+			}
+			unset( $coverage_row );
+
+			$coverage_rows = array_values( $coverage );
+			usort(
+				$coverage_rows,
+				static function ( array $left, array $right ): int {
+					if ( $left['linking_source_count'] !== $right['linking_source_count'] ) {
+						return $left['linking_source_count'] <=> $right['linking_source_count'];
+					}
+
+					$title_comparison = strnatcasecmp( $left['target_title'], $right['target_title'] );
+					if ( 0 !== $title_comparison ) {
+						return $title_comparison;
+					}
+
+					return $left['target_id'] <=> $right['target_id'];
+				}
+			);
+
+			return $coverage_rows;
+		}
+
+		/**
+		 * Whether a saved occurrence started at a same-site destination.
+		 *
+		 * @param array<string,mixed> $row Occurrence row.
+		 */
+		private static function coverage_result_is_same_site( array $row ): bool {
+			if ( array_key_exists( 'is_same_site', $row ) ) {
+				return (bool) $row['is_same_site'];
+			}
+
+			return self::is_same_site_url( isset( $row['linked_url'] ) ? (string) $row['linked_url'] : '' );
+		}
+
+		/**
+		 * Resolve the scanned source item for a saved occurrence.
+		 *
+		 * @param array<string,mixed>                    $row       Occurrence row.
+		 * @param array<int,array<string,mixed>>         $coverage  Coverage rows keyed by ID.
+		 * @param array<string,int>                      $url_to_id Scanned permalink map.
+		 */
+		private static function coverage_source_id_for_result( array $row, array $coverage, array $url_to_id ): int {
+			$source_id = isset( $row['source_id'] ) ? max( 0, (int) $row['source_id'] ) : 0;
+			if ( $source_id > 0 && isset( $coverage[ $source_id ] ) ) {
+				return $source_id;
+			}
+
+			$source_key = self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+
+			return '' !== $source_key && isset( $url_to_id[ $source_key ] ) ? (int) $url_to_id[ $source_key ] : 0;
+		}
+
+		/**
+		 * Resolve the saved target, preferring a redirect's published final item.
+		 *
+		 * @param array<string,mixed>                    $row       Occurrence row.
+		 * @param array<int,array<string,mixed>>         $coverage  Coverage rows keyed by ID.
+		 * @param array<string,int>                      $url_to_id Scanned permalink map.
+		 */
+		private static function coverage_target_id_for_result( array $row, array $coverage, array $url_to_id ): int {
+			$target_id = isset( $row['coverage_target_id'] ) ? max( 0, (int) $row['coverage_target_id'] ) : 0;
+			if ( $target_id > 0 && isset( $coverage[ $target_id ] ) ) {
+				return $target_id;
+			}
+
+			$redirect_count = isset( $row['redirect_count'] ) && is_numeric( $row['redirect_count'] )
+				? max( 0, (int) $row['redirect_count'] )
+				: 0;
+			$is_redirected  = $redirect_count > 0 || ( isset( $row['link_kind_code'] ) && 'redirected' === $row['link_kind_code'] );
+			$candidate_url  = $is_redirected
+				? ( isset( $row['final_url'] ) ? (string) $row['final_url'] : '' )
+				: ( isset( $row['linked_url'] ) ? (string) $row['linked_url'] : '' );
+			$candidate_key  = self::normalize_destination_for_impact( $candidate_url );
+
+			return '' !== $candidate_key && isset( $url_to_id[ $candidate_key ] ) ? (int) $url_to_id[ $candidate_key ] : 0;
+		}
+
+		/**
+		 * Build a stable distinct-destination key for one outgoing occurrence.
+		 *
+		 * @param array<string,mixed> $row Occurrence row.
+		 */
+		private static function coverage_destination_key_for_result( array $row ): string {
+			$redirect_count = isset( $row['redirect_count'] ) && is_numeric( $row['redirect_count'] )
+				? max( 0, (int) $row['redirect_count'] )
+				: 0;
+			$final_url      = isset( $row['final_url'] ) ? (string) $row['final_url'] : '';
+			$destination    = $redirect_count > 0 && self::is_same_site_url( $final_url )
+				? $final_url
+				: ( isset( $row['linked_url'] ) ? (string) $row['linked_url'] : '' );
+
+			$normalized = self::normalize_destination_for_impact( $destination );
+
+			return '' !== $normalized ? $normalized : trim( $destination );
+		}
+
+		/**
 		 * Normalize a URL used as an impact-group key.
 		 *
 		 * Scheme and host case and fragments do not create separate groups. Paths,
@@ -1900,21 +2518,23 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		/**
 		 * Send CSV response and terminate.
 		 *
-		 * @param array<int,array<string,mixed>> $results Result rows.
-		 * @param string                         $report_type Report type: details or impact.
+		 * @param array<int,array<string,mixed>> $results       Result rows.
+		 * @param string                         $report_type   Report type: details, impact, or coverage.
+		 * @param array<int,array<string,mixed>> $content_items Saved scanned items.
 		 */
-		private static function send_csv( array $results, string $report_type ): void {
+		private static function send_csv( array $results, string $report_type, array $content_items = array() ): void {
 			nocache_headers();
 			header( 'Content-Type: text/csv; charset=utf-8' );
-			$report_type = 'impact' === $report_type ? 'impact' : 'details';
-			header( 'Content-Disposition: attachment; filename=indexlane-redirect-internal-link-auditor-' . $report_type . '-' . gmdate( 'Y-m-d-His' ) . '.csv' );
+			$report_type  = in_array( $report_type, array( 'details', 'impact', 'coverage' ), true ) ? $report_type : 'details';
+			$filename_type = 'coverage' === $report_type ? 'target-coverage' : $report_type;
+			header( 'Content-Disposition: attachment; filename=indexlane-redirect-internal-link-auditor-' . $filename_type . '-' . gmdate( 'Y-m-d-His' ) . '.csv' );
 
 			$output = fopen( 'php://output', 'w' );
 			if ( false === $output ) {
 				exit;
 			}
 
-			foreach ( self::build_csv_rows( $results, $report_type ) as $csv_row ) {
+			foreach ( self::build_csv_rows( $results, $report_type, $content_items ) as $csv_row ) {
 				fputcsv( $output, $csv_row, ',', '"', '' );
 			}
 
@@ -1924,11 +2544,48 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		/**
 		 * Build safe CSV rows, including the header, for a report type.
 		 *
-		 * @param array<int,array<string,mixed>> $results Result rows.
-		 * @param string                         $report_type Report type: details or impact.
+		 * @param array<int,array<string,mixed>> $results       Result rows.
+		 * @param string                         $report_type   Report type: details, impact, or coverage.
+		 * @param array<int,array<string,mixed>> $content_items Saved scanned items.
 		 * @return array<int,array<int,string>>
 		 */
-		private static function build_csv_rows( array $results, string $report_type ): array {
+		private static function build_csv_rows( array $results, string $report_type, array $content_items = array() ): array {
+			if ( 'coverage' === $report_type ) {
+				$rows = array(
+					array(
+						self::csv_safe( __( 'Target Title', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Target URL', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Incoming Link Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Distinct Linking Content Items', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Outgoing Internal-Link Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Distinct Internal Destinations', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Anchor-Text Variants', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Self-Link Count', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Direct Incoming Links', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Redirected Incoming Links', 'indexlane-redirect-internal-link-auditor' ) ),
+						self::csv_safe( __( 'Status', 'indexlane-redirect-internal-link-auditor' ) ),
+					),
+				);
+
+				foreach ( self::build_content_link_coverage( $content_items, $results ) as $row ) {
+					$rows[] = array(
+						self::csv_safe( (string) $row['target_title'] ),
+						self::csv_safe( (string) $row['target_url'] ),
+						self::csv_safe( (string) $row['incoming_occurrences'] ),
+						self::csv_safe( (string) $row['linking_source_count'] ),
+						self::csv_safe( (string) $row['outgoing_internal_occurrences'] ),
+						self::csv_safe( (string) $row['distinct_internal_destinations'] ),
+						self::csv_safe( implode( ' | ', $row['anchor_text_variants'] ) ),
+						self::csv_safe( (string) $row['self_link_count'] ),
+						self::csv_safe( (string) $row['direct_incoming'] ),
+						self::csv_safe( (string) $row['redirected_incoming'] ),
+						self::csv_safe( (string) $row['status'] ),
+					);
+				}
+
+				return $rows;
+			}
+
 			if ( 'impact' === $report_type ) {
 				$rows = array(
 					array(

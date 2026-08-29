@@ -166,9 +166,44 @@ fi
 [[ "$(json_value "${final_response}" data.session.stats.links_extracted)" == "283" ]]
 [[ "$(json_value "${final_response}" data.session.stats.links_audited)" == "282" ]]
 [[ "$(json_value "${final_response}" data.session.stats.skipped_external)" == "1" ]]
-[[ "$(json_value "${final_response}" data.session.stats.unique_destinations_checked)" == "242" ]]
-[[ "$(json_value "${final_response}" data.session.stats.http_requests)" == "282" ]]
-[[ "$(json_value "${final_response}" data.session.stats.actionable_issues)" == "82" ]]
+[[ "$(json_value "${final_response}" data.session.stats.unique_destinations_checked)" == "222" ]]
+[[ "$(json_value "${final_response}" data.session.stats.http_requests)" == "302" ]]
+[[ "$(json_value "${final_response}" data.session.stats.actionable_issues)" == "122" ]]
+
+curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${page_html}"
+grep -Fq -- 'Content link coverage' "${page_html}"
+grep -Fq -- 'No incoming links detected in scanned content.' "${page_html}"
+grep -Fq -- 'Showing 40 of 40 content items.' "${page_html}"
+
+filtered_page="${temporary_root}/coverage-filtered.html"
+curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor&coverage_filter=attention" -o "${filtered_page}"
+grep -Fq -- 'Zero or one linking source' "${filtered_page}"
+grep -Fq -- 'Showing 30 of 40 content items.' "${filtered_page}"
+
+target_detail_url="$(php -r '
+	$html = file_get_contents($argv[1]);
+	$dom = new DOMDocument();
+	libxml_use_internal_errors(true);
+	$dom->loadHTML($html);
+	libxml_clear_errors();
+	$xpath = new DOMXPath($dom);
+	foreach ($xpath->query("//tr") as $row) {
+		if (strpos($row->textContent, "Help center article 1") === false) {
+			continue;
+		}
+		foreach ($xpath->query(".//a[contains(@href, \"coverage_target=\")]", $row) as $link) {
+			echo html_entity_decode($link->getAttribute("href"), ENT_QUOTES | ENT_HTML5);
+			exit;
+		}
+	}
+	fwrite(STDERR, "Could not find the target-detail link.\n");
+	exit(1);
+' "${page_html}")"
+target_detail_page="${temporary_root}/coverage-target.html"
+curl -fsS -b "${cookie_jar}" "${target_detail_url}" -o "${target_detail_page}"
+grep -Fq -- 'Incoming link details: Help center article 1' "${target_detail_page}"
+grep -Fq -- 'Redirected' "${target_detail_page}"
+grep -Fq -- 'Earlier article 1' "${target_detail_page}"
 
 details_csv="${temporary_root}/details.csv"
 details_headers="${temporary_root}/details.headers"
@@ -186,6 +221,17 @@ curl -fsS -b "${cookie_jar}" \
 	--data-urlencode "session_id=${session_id}" \
 	--data "indexlane_rila_action=export_impact" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${impact_csv}"
-[[ "$(wc -l < "${impact_csv}" | tr -d ' ')" == "82" ]]
+[[ "$(wc -l < "${impact_csv}" | tr -d ' ')" == "122" ]]
+
+coverage_csv="${temporary_root}/coverage.csv"
+coverage_headers="${temporary_root}/coverage.headers"
+curl -fsS -b "${cookie_jar}" -D "${coverage_headers}" \
+	--data-urlencode "indexlane_rila_nonce=${nonce}" \
+	--data-urlencode "session_id=${session_id}" \
+	--data "indexlane_rila_action=export_coverage" \
+	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${coverage_csv}"
+grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-target-coverage-' "${coverage_headers}"
+[[ "$(wc -l < "${coverage_csv}" | tr -d ' ')" == "41" ]]
+grep -Fq -- '"Target Title","Target URL","Incoming Link Occurrences"' "${coverage_csv}"
 
 printf 'Authenticated WordPress AJAX end-to-end tests passed.\n'

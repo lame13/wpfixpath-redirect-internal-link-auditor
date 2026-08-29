@@ -67,14 +67,34 @@ add_filter(
 		$path     = (string) wp_parse_url( $url, PHP_URL_PATH );
 		$status   = 0;
 		$location = '';
+		$resolved_post_id = (int) url_to_postid( $url );
+		$resolved_post    = $resolved_post_id > 0 ? get_post( $resolved_post_id ) : null;
+		$query_vars       = array();
+		$query_string     = (string) wp_parse_url( $url, PHP_URL_QUERY );
+		if ( '' !== $query_string ) {
+			parse_str( $query_string, $query_vars );
+		}
+		if ( ! $resolved_post instanceof WP_Post && isset( $query_vars['indexlane_e2e'] ) && is_scalar( $query_vars['indexlane_e2e'] ) ) {
+			$resolved_post = get_page_by_path( sanitize_title( (string) $query_vars['indexlane_e2e'] ), OBJECT, 'indexlane_e2e' );
+		}
 
-		if ( '/e2e-common' === $path || preg_match( '#^/e2e-(ok|final)-[0-9]+(?:-[0-9]+)?$#', $path ) ) {
+		if ( $resolved_post instanceof WP_Post && 'indexlane_e2e' === $resolved_post->post_type && 'publish' === $resolved_post->post_status ) {
+			$status = 200;
+		} elseif ( '/e2e-common' === $path || preg_match( '#^/e2e-(ok|final)-[0-9]+(?:-[0-9]+)?$#', $path ) ) {
 			$status = 200;
 		} elseif ( preg_match( '#^/e2e-broken-[0-9]+$#', $path ) ) {
 			$status = 404;
 		} elseif ( preg_match( '#^/e2e-redirect-([0-9]+)$#', $path, $matches ) ) {
 			$status   = 301;
 			$location = home_url( '/e2e-final-' . $matches[1] );
+		} elseif ( preg_match( '#^/e2e-content-redirect-[0-9]+-([0-9]+)$#', $path, $matches ) ) {
+			$target_post = get_post( (int) $matches[1] );
+			if ( $target_post instanceof WP_Post && 'indexlane_e2e' === $target_post->post_type && 'publish' === $target_post->post_status ) {
+				$status   = 301;
+				$location = (string) get_permalink( $target_post );
+			} else {
+				$status = 404;
+			}
 		} elseif ( '/e2e-external-redirect' === $path ) {
 			$status   = 302;
 			$location = 'https://external.invalid/landing';
