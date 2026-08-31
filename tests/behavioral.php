@@ -574,7 +574,7 @@ $details_csv = indexlane_invoke(
 		'details',
 	)
 );
-indexlane_assert_same( 'Source Post/Page', $details_csv[0][0], 'Detailed CSV should retain its existing first column.' );
+indexlane_assert_same( 'Content Item', $details_csv[0][0], 'Detailed CSV should begin with the content item.' );
 indexlane_assert_same( '\' =HYPERLINK("https://attacker.test")', $details_csv[1][0], 'CSV safety should block formulas after leading spaces.' );
 indexlane_assert_same( "'\n+SUM(1,1)", $details_csv[1][8], 'CSV safety should block formulas after leading newlines.' );
 
@@ -590,7 +590,7 @@ $impact_csv_input = array(
 	),
 );
 $impact_csv = indexlane_invoke( 'build_csv_rows', array( $impact_csv_input, 'impact' ) );
-indexlane_assert_same( 'Destination', $impact_csv[0][0], 'Impact CSV should have a destination-centric header.' );
+indexlane_assert_same( 'URL', $impact_csv[0][0], 'Problem-URL CSV should begin with the URL.' );
 indexlane_assert_same( '\'=IMPORTXML("https://attacker.test") Broken link (404)', $impact_csv[1][8], 'Impact evidence should receive the same CSV formula protection.' );
 indexlane_assert_same( "'\t@SUM(1,1)", indexlane_invoke( 'csv_safe', array( "\t@SUM(1,1)" ) ), 'CSV safety should block formulas after a leading tab.' );
 indexlane_assert_same( "'-2+3", indexlane_invoke( 'csv_safe', array( '-2+3' ) ), 'CSV safety should block minus-prefixed formulas.' );
@@ -744,7 +744,7 @@ indexlane_assert_same( 'Multiple linking sources', $coverage_by_id[1]['status'],
 
 $coverage_csv = indexlane_invoke( 'build_csv_rows', array( $coverage_results, 'coverage', $coverage_items ) );
 indexlane_assert_same( 6, count( $coverage_csv ), 'The target-coverage CSV should contain every scanned item plus its header.' );
-indexlane_assert_same( 'Target Title', $coverage_csv[0][0], 'The dedicated coverage CSV should start with the target title.' );
+indexlane_assert_same( 'Content', $coverage_csv[0][0], 'The dedicated coverage CSV should begin with the content item.' );
 $alpha_csv_rows = array_values(
 	array_filter(
 		$coverage_csv,
@@ -802,9 +802,9 @@ indexlane_assert_same( 'still', $comparison_by_url['https://example.test/still']
 
 $comparison_csv = indexlane_invoke( 'build_comparison_csv_rows', array( $comparison ) );
 indexlane_assert_same( 7, count( $comparison_csv ), 'Comparison CSV must contain every compared issue destination plus its header.' );
-indexlane_assert_same( 'Category', $comparison_csv[0][0], 'Comparison CSV must begin with its category.' );
-indexlane_assert_same( 'Baseline HTTP Status Chain', $comparison_csv[0][4], 'Comparison CSV must expose old status evidence explicitly.' );
-indexlane_assert_same( 'Verification Affected Content Items', $comparison_csv[0][15], 'Comparison CSV must expose new affected-source evidence explicitly.' );
+indexlane_assert_same( 'Outcome', $comparison_csv[0][0], 'Comparison CSV must begin with its outcome.' );
+indexlane_assert_same( 'Saved Scan HTTP Status Chain', $comparison_csv[0][4], 'Comparison CSV must expose saved-scan status results explicitly.' );
+indexlane_assert_same( 'Latest Scan Content Items Affected', $comparison_csv[0][15], 'Comparison CSV must expose latest-scan content impact explicitly.' );
 
 $baseline_content_items = array(
 	array(
@@ -867,7 +867,7 @@ $baseline = indexlane_invoke( 'build_baseline_from_session', array( $baseline_se
 indexlane_assert_same( false, is_wp_error( $baseline ), 'A complete consistent scan must produce portable baseline evidence.' );
 indexlane_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'Baseline JSON must identify its document format.' );
 indexlane_assert_same( 1, $baseline['schema_version'], 'Baseline JSON must carry an explicit schema version.' );
-indexlane_assert_same( '0.5.0', $baseline['plugin_version'], 'Baseline metadata must identify the plugin version.' );
+indexlane_assert_same( '0.5.1', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
 indexlane_assert_same( 'https://example.test', $baseline['site_url'], 'Baseline site ownership must use a normalized exact home URL.' );
 indexlane_assert_same( true, $baseline['completion']['complete'], 'Only complete evidence may be saved as a baseline.' );
 indexlane_assert_same( 0, $baseline['completion']['request_allowance_extensions'], 'Baseline metadata must preserve the request-limit extension state.' );

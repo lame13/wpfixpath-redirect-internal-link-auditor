@@ -62,7 +62,7 @@
 
 .indexlane-rila-baseline-metadata {
 	display: grid;
-	grid-template-columns: repeat( 3, minmax( 0, 1fr ) );
+	grid-template-columns: repeat( 4, minmax( 0, 1fr ) );
 	gap: 1px;
 	margin: 20px 0;
 	border: 1px solid #dcdcde;
@@ -167,6 +167,18 @@
 	margin: 0 18px 8px 0;
 }
 
+.indexlane-rila-advanced-settings > summary,
+.indexlane-rila-technical-details > summary,
+.indexlane-rila-technical-downloads > summary,
+.indexlane-rila-row-details > summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.indexlane-rila-advanced-settings > div {
+	margin-top: 12px;
+}
+
 .indexlane-rila-wrap input[type="number"] {
 	width: 88px;
 }
@@ -228,7 +240,7 @@
 
 .indexlane-rila-metrics {
 	display: grid;
-	grid-template-columns: repeat( 5, minmax( 130px, 1fr ) );
+	grid-template-columns: repeat( 4, minmax( 130px, 1fr ) );
 	gap: 1px;
 	overflow: hidden;
 	border: 1px solid #dcdcde;
@@ -268,6 +280,61 @@
 
 .indexlane-rila-export-actions .description {
 	flex-basis: 100%;
+}
+
+.indexlane-rila-technical-downloads {
+	position: relative;
+}
+
+.indexlane-rila-technical-downloads[open] {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.indexlane-rila-technical-downloads[open] > summary {
+	margin-right: 4px;
+}
+
+.indexlane-rila-technical-details {
+	margin-top: 16px;
+}
+
+.indexlane-rila-technical-details > summary {
+	width: fit-content;
+	color: #50575e;
+}
+
+.indexlane-rila-technical-metadata {
+	display: grid;
+	grid-template-columns: repeat( 3, minmax( 0, 1fr ) );
+	gap: 1px;
+	margin: 12px 0 0;
+	border: 1px solid #dcdcde;
+	background: #dcdcde;
+}
+
+.indexlane-rila-technical-metadata > div {
+	min-width: 0;
+	padding: 10px 12px;
+	background: #f6f7f7;
+}
+
+.indexlane-rila-technical-metadata dt {
+	margin-bottom: 3px;
+	color: #646970;
+	font-size: 12px;
+	font-weight: 600;
+}
+
+.indexlane-rila-technical-metadata dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.indexlane-rila-results-summary {
+	font-size: 15px;
+	font-weight: 600;
 }
 
 .indexlane-rila-results {
@@ -360,6 +427,62 @@
 	margin-top: 4px;
 	color: #646970;
 	font-size: 12px;
+}
+
+.indexlane-rila-cell-note {
+	display: block;
+	margin-top: 4px;
+	color: #646970;
+	font-size: 12px;
+}
+
+.indexlane-rila-row-details {
+	min-width: 145px;
+}
+
+.indexlane-rila-row-details[open] {
+	min-width: 230px;
+}
+
+.indexlane-rila-row-detail-list {
+	margin: 10px 0 0;
+}
+
+.indexlane-rila-row-detail-list > div + div {
+	margin-top: 9px;
+	padding-top: 9px;
+	border-top: 1px solid #dcdcde;
+}
+
+.indexlane-rila-row-detail-list dt {
+	margin-bottom: 3px;
+	color: #646970;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+.indexlane-rila-comparison-source-count {
+	display: block;
+	overflow-wrap: anywhere;
+}
+
+.indexlane-rila-comparison-source-count + .indexlane-rila-comparison-source-count {
+	margin-top: 6px;
+}
+
+.indexlane-rila-comparison-source-count > span {
+	display: block;
+	margin-bottom: 1px;
+	color: #646970;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+.indexlane-rila-row-detail-list dd {
+	margin: 0;
+	overflow-wrap: anywhere;
 }
 
 .indexlane-rila-comparison-old,
@@ -528,11 +651,11 @@
 }
 
 .indexlane-rila-table-scroll .indexlane-rila-impact-table {
-	min-width: 1180px;
+	min-width: 760px;
 }
 
 .indexlane-rila-table-scroll .indexlane-rila-coverage-table {
-	min-width: 1680px;
+	min-width: 820px;
 }
 
 .indexlane-rila-table-scroll .indexlane-rila-target-detail-table {
@@ -544,7 +667,7 @@
 }
 
 .indexlane-rila-table-scroll .indexlane-rila-comparison-table {
-	min-width: 1780px;
+	min-width: 900px;
 }
 
 .indexlane-rila-results td,
@@ -564,7 +687,7 @@
 }
 
 .indexlane-rila-impact-table td:first-child,
-.indexlane-rila-impact-table td:nth-child(8) {
+.indexlane-rila-comparison-table td:first-child {
 	overflow-wrap: anywhere;
 	word-break: break-word;
 }
@@ -575,12 +698,9 @@
 	}
 
 	.indexlane-rila-baseline-metadata,
+	.indexlane-rila-technical-metadata,
 	.indexlane-rila-comparison-summary {
 		grid-template-columns: repeat( 2, minmax( 140px, 1fr ) );
-	}
-
-	.indexlane-rila-metrics > div:last-child {
-		grid-column: 1 / -1;
 	}
 }
 
@@ -620,6 +740,7 @@
 	}
 
 	.indexlane-rila-baseline-metadata,
+	.indexlane-rila-technical-metadata,
 	.indexlane-rila-comparison-summary {
 		grid-template-columns: 1fr;
 	}

@@ -21,6 +21,8 @@
 	const stateMessage = document.getElementById( 'indexlane-rila-message' );
 	const progress = document.getElementById( 'indexlane-rila-progress' );
 	const requestError = document.getElementById( 'indexlane-rila-request-error' );
+	const requestLimit = document.getElementById( 'indexlane-rila-request-limit' );
+	const requestsRemaining = document.getElementById( 'indexlane-rila-requests-remaining' );
 	const metrics = {
 		content_items_processed: document.getElementById( 'indexlane-rila-stat-content' ),
 		links_extracted: document.getElementById( 'indexlane-rila-stat-links' ),
@@ -79,6 +81,12 @@
 		Object.keys( metrics ).forEach( function ( key ) {
 			metrics[ key ].textContent = String( session.stats[ key ] || 0 );
 		} );
+		if ( requestLimit ) {
+			requestLimit.textContent = String( session.request_limit || 0 );
+		}
+		if ( requestsRemaining ) {
+			requestsRemaining.textContent = String( session.request_allowance_remaining || 0 );
+		}
 
 		setHidden( pauseButton, session.status !== 'running' || haltedByError );
 		setHidden( resumeButton, session.status !== 'paused' && ! ( session.status === 'running' && haltedByError ) );

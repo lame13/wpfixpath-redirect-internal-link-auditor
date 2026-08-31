@@ -515,16 +515,16 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 
 		$warnings = array();
 		if ( $is_old ) {
-			$warnings[] = __( 'Old domain', 'indexlane-redirect-internal-link-auditor' );
+			$warnings[] = __( 'Old-site URL', 'indexlane-redirect-internal-link-auditor' );
 		}
 		if ( $is_staging ) {
-			$warnings[] = __( 'Staging/dev domain', 'indexlane-redirect-internal-link-auditor' );
+			$warnings[] = __( 'Staging or development URL', 'indexlane-redirect-internal-link-auditor' );
 		}
 
 		$should_request = $is_current;
 
 		if ( ! $should_request ) {
-			$warnings[] = __( 'Status check skipped by same-site scope', 'indexlane-redirect-internal-link-auditor' );
+			$warnings[] = __( 'Not checked because this URL is on another site.', 'indexlane-redirect-internal-link-auditor' );
 
 			return array(
 				'type' => 'row',
@@ -852,8 +852,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 					$state,
 					false,
 					sprintf(
-						/* translators: %d: initial outbound HTTP request allowance */
-						__( 'Status check incomplete because the %d-request allowance was reached', 'indexlane-redirect-internal-link-auditor' ),
+						/* translators: %d: initial outbound HTTP request limit */
+						__( 'Status check incomplete because the %d-request limit was reached', 'indexlane-redirect-internal-link-auditor' ),
 						self::INITIAL_REQUEST_ALLOWANCE
 					)
 				);
@@ -1155,7 +1155,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			case 'paused':
 				return __( 'Paused', 'indexlane-redirect-internal-link-auditor' );
 			case 'limit_reached':
-				return __( 'Request allowance reached', 'indexlane-redirect-internal-link-auditor' );
+				return __( 'Request limit reached', 'indexlane-redirect-internal-link-auditor' );
 			case 'complete':
 				return __( 'Complete', 'indexlane-redirect-internal-link-auditor' );
 			default:
@@ -1171,15 +1171,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			case 'running':
 				return __( 'Keep this page open while the browser requests the next small batch. You can pause safely after the current batch.', 'indexlane-redirect-internal-link-auditor' );
 			case 'paused':
-				return __( 'Progress and accumulated evidence are saved. Continue here now or after reloading the page.', 'indexlane-redirect-internal-link-auditor' );
+				return __( 'Your progress is saved. Continue now or after reloading this page.', 'indexlane-redirect-internal-link-auditor' );
 			case 'limit_reached':
-				return sprintf(
-					/* translators: %d: number of requests granted by the continue action */
-					__( 'Progress is saved before any incomplete destination evidence is recorded. Continue to allow up to %d more outbound requests.', 'indexlane-redirect-internal-link-auditor' ),
-					self::REQUEST_ALLOWANCE_INCREMENT
-				);
+				return __( 'Your progress is saved. Increase the request limit to continue.', 'indexlane-redirect-internal-link-auditor' );
 			case 'complete':
-				return __( 'Every selected content item and queued same-site destination has been processed. The CSV exports use this exact evidence.', 'indexlane-redirect-internal-link-auditor' );
+				return __( 'All selected content and same-site URLs have been checked. Downloads use these exact results.', 'indexlane-redirect-internal-link-auditor' );
 			default:
 				return '';
 		}

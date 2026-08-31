@@ -2,7 +2,7 @@
 
 Audit redirects, broken links, and content link coverage in the stored content of any public WordPress post type.
 
-Version 0.5 adds opt-in baselines and exact-scope fix verification to the complete, resumable scan and content-link coverage workflow. It remains read-only, never follows external redirect targets, and does not call an IndexLane service.
+Version 0.5 adds saved scans and exact-scope fix checks to the complete, resumable scan and content-link coverage workflow. It remains read-only, never follows external redirect targets, and does not call an IndexLane service.
 
 Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://indexlane.dev/plugins/redirect-internal-link-auditor)
 
@@ -11,26 +11,26 @@ Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://ind
 - Choose all published content or a numeric limit of the newest content.
 - Select any registered public post type.
 - Process work through authenticated WordPress AJAX in small browser-driven batches.
-- See content processed, links extracted, unique destinations checked, actual HTTP requests, and actionable issue occurrences.
+- See content checked, links found, unique URLs checked, and links needing attention.
 - Pause, continue, cancel, or reload and resume one per-administrator session.
-- Deduplicate requests for the same destination across the entire session while retaining every source occurrence.
-- Stop at an explicit 250-request session allowance and continue with another 250 requests when needed.
-- Export target-coverage, destination-impact, and detailed-row CSVs only from exact completed-session evidence.
+- Deduplicate requests for the same URL across the entire session while retaining every link found.
+- Stop at an explicit 250-request limit and increase that limit by 250 when needed.
+- Download content-coverage, problem-URL, and link-detail CSVs only from exact completed scan results.
 
-Each AJAX batch processes at most five content items and makes at most five actual outbound HTTP requests. Redirect chains persist between batches, so an allowance boundary never turns partial redirect evidence into a result row.
+Each AJAX batch processes at most five content items and makes at most five actual outbound HTTP requests. Redirect chains persist between batches, so a request-limit boundary never creates a partial result row.
 
-## Baselines and fix verification
+## Saved scans and fix checks
 
-- Save one explicitly selected completed scan as a site-specific baseline for the current administrator.
-- Export or import portable, versioned JSON evidence with strict schema, file-size, completeness, counter, and site-URL validation.
+- Save one explicitly selected completed scan for comparison for the current administrator.
+- Download or upload portable, versioned JSON scan data with strict format, file-size, completeness, counter, and site-URL validation.
 - Rerun the saved post types, content scope, old domains, timeout, and redirect limit exactly.
-- Bind each verification session to the baseline ID and fingerprint used when it started.
-- Classify destination issues as new, worsened or changed, resolved, or still present.
-- Show baseline and verification status chains, redirect counts, final URLs, result severity, occurrence counts, and affected-content counts.
-- Export the completed comparison as CSV without making additional HTTP requests.
-- Delete the saved baseline explicitly without deleting the current temporary scan session.
+- Bind each fix check to the saved scan revision used when it started.
+- Classify URL issues as new, changed, resolved, or still present.
+- Show saved-scan and latest-scan status chains, redirect counts, final URLs, outcomes, times linked, and content items affected.
+- Download the completed comparison as CSV without making additional HTTP requests.
+- Delete the saved scan explicitly without deleting the current temporary scan session.
 
-Baseline comparison is derived entirely from retained evidence. It never rescans during page rendering or export, and it refuses to compare when the saved baseline changed after verification started.
+The comparison is derived entirely from retained results. It never rescans during page rendering or download, and it refuses to compare when the saved scan changed after the fix check started.
 
 ## What it checks
 
@@ -41,7 +41,7 @@ Baseline comparison is derived entirely from retained evidence. It never rescans
 - same-site redirects that leave the site, without fetching the external target
 - links pointing to old domains entered by the administrator
 - common staging or development-domain links
-- occurrence source, edit URL, anchor text, status chain, redirect count, final URL, warning, and result
+- content item, edit URL, link text, status chain, redirect count, final URL, warning, and outcome
 
 Unrelated external links are skipped. Old, staging, and development-domain links are reported but never fetched.
 
@@ -49,31 +49,31 @@ Unrelated external links are skipped. Old, staging, and development-domain links
 
 The completed report contains one row per scanned published content item. Each row includes:
 
-- target title and URL
-- incoming link occurrences and distinct linking content items
-- outgoing internal-link occurrences and distinct internal destinations
-- anchor-text variants pointing to the target
+- content title and URL
+- times linked and distinct linking content items
+- outgoing internal links and distinct linked URLs
+- link-text variants pointing to the content
 - self-link count
 - direct and redirected incoming-link counts
 - a conservative zero-, one-, or multiple-source status
 
-Open a target's details to review every saved source, anchor, linked URL, status chain, and final URL. Filter the report to content with zero or one detected linking source, or export the complete target-coverage CSV.
+Open a content item's link details to review every source, link text, linked URL, status chain, and final URL. Filter the report to content with zero or one detected linking content item, or download the complete content-coverage CSV.
 
-When a scanned link redirects to a published WordPress URL, coverage counts the occurrence toward that final content item and retains the redirect evidence. The coverage projection makes no additional HTTP requests.
+When a scanned link redirects to a published WordPress URL, coverage counts the link toward that final content item and retains the redirect results. The coverage report makes no additional HTTP requests.
 
 “No incoming links detected in scanned content” describes only the selected items' stored `post_content`. It does not inspect menus, templates, widgets, shortcode output, or rendered page-builder content.
 
-## Destination impact
+## Problem URLs
 
-One row is derived for each broken/error or redirected destination. The view includes occurrences, distinct affected content items, result severity, HTTP status evidence, maximum redirect count, observed final URLs, and warning evidence. It never makes additional requests.
+One row is derived for each broken/error or redirected URL. The primary view shows the URL, outcome, times linked, and content items affected. HTTP status, redirect count, final URLs, and warnings remain available under technical details. The report never makes additional requests.
 
-Destination grouping normalizes scheme and host case, fragments, and default ports. Paths, query strings, schemes, non-default ports, and trailing slashes remain distinct because they can return different evidence.
+URL grouping normalizes scheme and host case, fragments, and default ports. Paths, query strings, schemes, non-default ports, and trailing slashes remain distinct because they can return different results.
 
 ## Data handling
 
-One active or completed scan session per administrator is stored in a WordPress transient. Its sliding expiry is 24 hours, so abandoned sessions are cleaned up automatically by WordPress and completed evidence remains available briefly for export.
+One active or completed scan session per administrator is stored in a WordPress transient. Its sliding expiry is 24 hours, so abandoned sessions are cleaned up automatically by WordPress and completed results remain available briefly for download.
 
-One opt-in, site-specific baseline per administrator is stored in WordPress user options until explicitly replaced or deleted. Portable JSON supports longer-term evidence outside WordPress without creating an in-plugin scan-history system.
+One opt-in, site-specific saved scan per administrator is stored in WordPress user options until explicitly replaced or deleted. Portable JSON supports longer-term storage outside WordPress without creating an in-plugin scan-history system.
 
 The plugin creates no custom table, cron job, account, telemetry, frontend tracking, or content mutation.
 
@@ -85,52 +85,52 @@ This is a stored-content link checker, not a rendered-site crawler. It does not 
 
 HTTP checks use bounded GET response bodies, administrator-selected timeouts and redirect limits, WordPress unsafe-URL rejection, and manual same-site redirect handling.
 
-Baseline imports are limited to 20 MiB, 100,000 content items, and 100,000 occurrence rows. Imported data must use the exact supported schema and belong to the current normalized site URL.
+Saved-scan uploads are limited to 20 MB, 100,000 content items, and 100,000 link-result rows. Uploaded data must use the exact supported format and belong to the current normalized site URL.
 
-## CSV exports
+## CSV downloads
 
-Target-coverage columns:
+Content-coverage columns:
 
-- Target Title
-- Target URL
-- Incoming Link Occurrences
-- Distinct Linking Content Items
-- Outgoing Internal-Link Occurrences
-- Distinct Internal Destinations
-- Anchor-Text Variants
-- Self-Link Count
-- Direct Incoming Links
-- Redirected Incoming Links
-- Status
+- Content
+- Content URL
+- Times Linked
+- Content Items Linking Here
+- Links From This Content
+- Unique URLs Linked
+- Link Text
+- Self-Links
+- Direct Links Here
+- Redirected Links Here
+- Outcome
 
-Destination impact columns:
+Problem-URL columns:
 
-- Destination
-- Impact
-- Occurrences
-- Affected Content Items
-- Result
-- HTTP Status Evidence
-- Maximum Observed Redirects
-- Observed Final URLs
-- Warning Evidence
+- URL
+- Problem
+- Times Linked
+- Content Items Affected
+- Outcome
+- HTTP Status
+- Maximum Redirects
+- Final URLs
+- Warnings
 
-Detailed-row columns:
+Link-detail columns:
 
-- Source Post/Page
-- Source Type
-- Source URL
+- Content Item
+- Content Type
+- Content URL
 - Linked URL
 - HTTP Status
-- Redirect Count
+- Redirects
 - Final URL
 - Warning
-- Anchor Text
-- Result
+- Link Text
+- Outcome
 
-Verification-comparison columns include the category, direction, destination, changed fields, and explicit baseline/verification values for every required evidence field.
+Comparison columns include the outcome, change, URL, changed fields, and explicit saved-scan/latest-scan values for each technical field.
 
-All exports protect spreadsheet cells that could otherwise be interpreted as formulas.
+All downloads protect spreadsheet cells that could otherwise be interpreted as formulas.
 
 ## Result labels
 
@@ -140,7 +140,7 @@ All exports protect spreadsheet cells that could otherwise be interpreted as for
 - Error
 - Needs review
 
-Labels are intentionally conservative. The plugin reports link evidence; it does not guess SEO impact.
+Labels are intentionally conservative. The plugin reports link results; it does not guess SEO impact.
 
 ## Development
 
@@ -156,7 +156,7 @@ php tests/behavioral.php
 WP_CLI_BIN=/path/to/wp ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-link-auditor.pot
 ```
 
-The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded integration suite, and exercises the authenticated AJAX lifecycle, baseline save/import/export/delete flow, exact-scope verification, comparison export, coverage filters, and detail views over HTTP.
+The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded integration suite, and exercises the authenticated AJAX lifecycle, saved-scan save/upload/download/delete flow, exact-scope fix checks, comparison downloads, coverage filters, and detail views over HTTP.
 
 Build the production ZIP for WordPress.org submission:
 

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.1 - 2026-08-31
+
+- Rewrote the administrator workflow around saved scans, fix checks, results, URLs, link details, and downloads without changing the plugin name or read-only behavior.
+- Put the first scan form before the empty saved-scan panel and current scan progress before saved-scan details.
+- Moved request controls into collapsed advanced settings and moved request accounting, exact settings, schema data, and raw JSON downloads into technical details.
+- Reduced comparison, content-coverage, and problem-URL tables to their primary decisions while retaining HTTP, redirect, final-URL, and before/after data in expandable details.
+- Simplified completed-scan summaries, added correct singular/plural labels, grouped downloads by purpose, and updated CSV headings.
+- Regenerated all WordPress screenshots and expanded behavioral, integration, translation, and authenticated AJAX coverage for the revised interface.
+
 ## 0.5.0 - 2026-08-31
 
 - Added one opt-in, site-specific baseline per administrator with strict JSON export, import, replacement, and deletion controls.

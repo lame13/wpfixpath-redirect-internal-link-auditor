@@ -241,7 +241,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 
 			$anchor_text = isset( $row['anchor_text'] ) ? trim( (string) $row['anchor_text'] ) : '';
 			if ( '' === $anchor_text ) {
-				$anchor_text = __( '(empty anchor)', 'indexlane-redirect-internal-link-auditor' );
+				$anchor_text = __( '(no link text)', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			$coverage[ $target_id ]['incoming_occurrences']++;
@@ -540,17 +540,17 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 		if ( 'coverage' === $report_type ) {
 			$rows = array(
 				array(
-					self::csv_safe( __( 'Target Title', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Target URL', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Incoming Link Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Distinct Linking Content Items', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Outgoing Internal-Link Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Distinct Internal Destinations', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Anchor-Text Variants', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Self-Link Count', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Direct Incoming Links', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Redirected Incoming Links', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Status', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Content', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Content URL', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Content Items Linking Here', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Links From This Content', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Unique URLs Linked', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Link Text', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Self-Links', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Direct Links Here', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Redirected Links Here', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 				),
 			);
 
@@ -576,15 +576,15 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 		if ( 'impact' === $report_type ) {
 			$rows = array(
 				array(
-					self::csv_safe( __( 'Destination', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Impact', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Affected Content Items', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Result', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'HTTP Status Evidence', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Maximum Observed Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Observed Final URLs', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Warning Evidence', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'URL', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Problem', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Content Items Affected', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'HTTP Status', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Maximum Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Final URLs', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Warnings', 'indexlane-redirect-internal-link-auditor' ) ),
 				),
 			);
 
@@ -607,16 +607,16 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 
 		$rows = array(
 			array(
-				self::csv_safe( __( 'Source Post/Page', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Source Type', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Source URL', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Content Item', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Content Type', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Content URL', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'HTTP Status', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Redirect Count', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Warning', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Anchor Text', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Result', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Link Text', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 			),
 		);
 

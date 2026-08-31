@@ -65,9 +65,9 @@ wp_set_current_user( $administrator->ID );
 
 $translation_filter = static function ( string $translation, string $text ): string {
 	$translations = array(
-		'Destination' => 'Ziel',
-		'Paused'      => 'Pausiert',
-		'Target Title' => 'Zieltitel',
+		'Content' => 'Inhalt',
+		'Paused'  => 'Pausiert',
+		'URL'     => 'Adresse',
 	);
 
 	return isset( $translations[ $text ] ) ? $translations[ $text ] : $translation;
@@ -75,9 +75,9 @@ $translation_filter = static function ( string $translation, string $text ): str
 add_filter( 'gettext_indexlane-redirect-internal-link-auditor', $translation_filter, 10, 2 );
 indexlane_wp_assert_same( 'Pausiert', indexlane_wp_invoke( 'scan_state_label', array( 'paused' ) ), 'Session-state copy must use the exact plugin text domain.' );
 $translated_csv = indexlane_wp_invoke( 'build_csv_rows', array( array(), 'impact' ) );
-indexlane_wp_assert_same( 'Ziel', $translated_csv[0][0], 'CSV headers must be translated through the exact plugin text domain.' );
+indexlane_wp_assert_same( 'Adresse', $translated_csv[0][0], 'CSV headers must be translated through the exact plugin text domain.' );
 $translated_coverage_csv = indexlane_wp_invoke( 'build_csv_rows', array( array(), 'coverage', array() ) );
-indexlane_wp_assert_same( 'Zieltitel', $translated_coverage_csv[0][0], 'Coverage CSV headers must use the exact plugin text domain.' );
+indexlane_wp_assert_same( 'Inhalt', $translated_coverage_csv[0][0], 'Coverage CSV headers must use the exact plugin text domain.' );
 $translated_comparison_csv = indexlane_wp_invoke(
 	'build_comparison_csv_rows',
 	array(
@@ -87,7 +87,7 @@ $translated_comparison_csv = indexlane_wp_invoke(
 		)
 	)
 );
-indexlane_wp_assert_same( 'Ziel', $translated_comparison_csv[0][2], 'Comparison CSV headers must use the exact plugin text domain.' );
+indexlane_wp_assert_same( 'Adresse', $translated_comparison_csv[0][2], 'Comparison CSV headers must use the exact plugin text domain.' );
 remove_filter( 'gettext_indexlane-redirect-internal-link-auditor', $translation_filter, 10 );
 
 $post_type = 'indexlane_fixture';
@@ -292,7 +292,7 @@ try {
 	}
 	indexlane_wp_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'A completed WordPress scan must produce portable baseline evidence.' );
 	indexlane_wp_assert_same( 1, $baseline['schema_version'], 'The baseline must use the supported evidence schema.' );
-	indexlane_wp_assert_same( '0.5.0', $baseline['plugin_version'], 'The baseline must identify the plugin version that created it.' );
+	indexlane_wp_assert_same( '0.5.1', $baseline['plugin_version'], 'The saved scan must identify the plugin version that created it.' );
 	indexlane_wp_assert_same( $home, $baseline['site_url'], 'The baseline must be bound to this exact WordPress site URL.' );
 	indexlane_wp_assert_same( 7, $baseline['scope']['total_items'], 'The baseline must preserve the complete selected corpus.' );
 	indexlane_wp_assert_same( true, $baseline['completion']['complete'], 'The baseline must explicitly record complete evidence.' );

@@ -1,4 +1,4 @@
-"Target Title","Target URL","Incoming Link Occurrences","Distinct Linking Content Items","Outgoing Internal-Link Occurrences","Distinct Internal Destinations","Anchor-Text Variants","Self-Link Count","Direct Incoming Links","Redirected Incoming Links",Status
+Content,"Content URL","Times Linked","Content Items Linking Here","Links From This Content","Unique URLs Linked","Link Text",Self-Links,"Direct Links Here","Redirected Links Here",Outcome
 "Services","https://example.com/services/",5,3,4,3,"our services | service page | services",0,4,1,"Multiple linking sources"
 "About","https://example.com/about/",1,1,2,2,"about our team",0,1,0,"One linking source"
 "Contact","https://example.com/contact/",0,0,3,3,"",0,0,0,"No incoming links detected in scanned content."

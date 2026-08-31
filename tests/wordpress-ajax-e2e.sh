@@ -177,7 +177,7 @@ grep -Fq -- 'Showing 40 of 40 content items.' "${page_html}"
 
 filtered_page="${temporary_root}/coverage-filtered.html"
 curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor&coverage_filter=attention" -o "${filtered_page}"
-grep -Fq -- 'Zero or one linking source' "${filtered_page}"
+grep -Fq -- 'Zero or one linking content item' "${filtered_page}"
 grep -Fq -- 'Showing 30 of 40 content items.' "${filtered_page}"
 
 target_detail_url="$(php -r '
@@ -201,7 +201,7 @@ target_detail_url="$(php -r '
 ' "${page_html}")"
 target_detail_page="${temporary_root}/coverage-target.html"
 curl -fsS -b "${cookie_jar}" "${target_detail_url}" -o "${target_detail_page}"
-grep -Fq -- 'Incoming link details: Help center article 1' "${target_detail_page}"
+grep -Fq -- 'Link details for: Help center article 1' "${target_detail_page}"
 grep -Fq -- 'Redirected' "${target_detail_page}"
 grep -Fq -- 'Earlier article 1' "${target_detail_page}"
 
@@ -232,7 +232,7 @@ curl -fsS -b "${cookie_jar}" -D "${coverage_headers}" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${coverage_csv}"
 grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-target-coverage-' "${coverage_headers}"
 [[ "$(wc -l < "${coverage_csv}" | tr -d ' ')" == "41" ]]
-grep -Fq -- '"Target Title","Target URL","Incoming Link Occurrences"' "${coverage_csv}"
+grep -Fq -- 'Content,"Content URL","Times Linked"' "${coverage_csv}"
 
 saved_baseline_page="${temporary_root}/baseline-saved.html"
 curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
@@ -240,8 +240,8 @@ curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
 	--data-urlencode "session_id=${session_id}" \
 	--data "indexlane_rila_action=save_baseline" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${saved_baseline_page}"
-grep -Fq -- 'Baseline ready' "${saved_baseline_page}"
-grep -Fq -- 'This completed scan is the saved baseline.' "${saved_baseline_page}"
+grep -Fq -- 'Saved scan ready' "${saved_baseline_page}"
+grep -Fq -- 'These results are saved for comparison.' "${saved_baseline_page}"
 
 baseline_json="${temporary_root}/baseline.json"
 baseline_headers="${temporary_root}/baseline.headers"
@@ -250,10 +250,10 @@ curl -fsS -b "${cookie_jar}" -D "${baseline_headers}" \
 	--data "indexlane_rila_action=export_baseline_json" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${baseline_json}"
 grep -Fqi -- 'content-type: application/json' "${baseline_headers}"
-grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-baseline-' "${baseline_headers}"
+grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-saved-scan-' "${baseline_headers}"
 php -r '
 	$data = json_decode(file_get_contents($argv[1]), true);
-	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 1 || $data["plugin_version"] !== "0.5.0") {
+	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 1 || $data["plugin_version"] !== "0.5.1") {
 		fwrite(STDERR, "Exported baseline metadata is invalid.\n");
 		exit(1);
 	}
@@ -321,9 +321,9 @@ fi
 
 verification_page="${temporary_root}/verification.html"
 curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${verification_page}"
-grep -Fq -- 'Verification comparison' "${verification_page}"
+grep -Fq -- 'What changed since the saved scan' "${verification_page}"
 grep -Fq -- 'New issues' "${verification_page}"
-grep -Fq -- 'Worsened or changed' "${verification_page}"
+grep -Fq -- 'Changed issues' "${verification_page}"
 grep -Fq -- 'Resolved' "${verification_page}"
 grep -Fq -- 'Still present' "${verification_page}"
 grep -Fq -- '>122</strong><span>Still present<' "${verification_page}"
@@ -340,7 +340,7 @@ grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-inter
 php -r '
 	$handle = fopen($argv[1], "r");
 	$header = false === $handle ? false : fgetcsv($handle, 0, ",", "\"", "");
-	$expected = array("Category", "Change", "Destination", "Changed Evidence", "Baseline HTTP Status Chain", "Verification HTTP Status Chain");
+	$expected = array("Outcome", "Change", "URL", "Changed Fields", "Saved Scan HTTP Status Chain", "Latest Scan HTTP Status Chain");
 	if (!is_array($header) || array_slice($header, 0, count($expected)) !== $expected) {
 		fwrite(STDERR, "Comparison CSV headers are invalid.\n");
 		exit(1);
@@ -353,7 +353,7 @@ curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
 	--data "confirm_delete=1" \
 	--data "indexlane_rila_action=delete_baseline" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${deleted_baseline_page}"
-grep -Fq -- 'No baseline saved' "${deleted_baseline_page}"
+grep -Fq -- 'No saved scan' "${deleted_baseline_page}"
 
 imported_baseline_page="${temporary_root}/baseline-imported.html"
 curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
@@ -361,8 +361,8 @@ curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
 	--form "baseline_file=@${baseline_json};type=application/json" \
 	--form-string "indexlane_rila_action=import_baseline" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${imported_baseline_page}"
-grep -Fq -- 'Baseline ready' "${imported_baseline_page}"
-grep -Fq -- 'validated JSON evidence was imported' "${imported_baseline_page}"
+grep -Fq -- 'Saved scan ready' "${imported_baseline_page}"
+grep -Fq -- 'saved-scan file was uploaded and is ready to use' "${imported_baseline_page}"
 
 curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
 	--data-urlencode "indexlane_rila_nonce=${nonce}" \

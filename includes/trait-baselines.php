@@ -25,7 +25,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! is_array( $session['content_items'] ) ||
 			! is_array( $session['results'] )
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'Only a complete, internally consistent scan can become baseline evidence.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'Only complete, internally consistent scan results can be saved for comparison.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$settings = array(
@@ -82,7 +82,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 
 		$encoded = wp_json_encode( $validated, JSON_UNESCAPED_SLASHES );
 		if ( ! is_string( $encoded ) || strlen( $encoded ) > self::MAX_BASELINE_FILE_SIZE ) {
-			return new WP_Error( 'baseline_too_large', __( 'This scan exceeds the 20 MiB baseline evidence limit.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_too_large', __( 'This scan is too large to save. The saved-scan limit is 20 MB.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return $validated;
@@ -98,7 +98,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function validate_baseline( array $baseline, bool $validate_site = true ) {
 		$top_keys = array( 'format', 'schema_version', 'baseline_id', 'plugin_version', 'site_url', 'scan_id', 'scan_utc', 'saved_utc', 'settings', 'scope', 'completion', 'stats', 'content_items', 'results' );
 		if ( ! self::array_has_exact_keys( $baseline, $top_keys ) || self::BASELINE_FORMAT !== $baseline['format'] || self::BASELINE_SCHEMA_VERSION !== $baseline['schema_version'] ) {
-			return new WP_Error( 'baseline_invalid_schema', __( 'The baseline format or schema version is not supported.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_schema', __( 'This saved-scan file format is not supported.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		if (
@@ -111,15 +111,15 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! is_string( $baseline['site_url'] ) ||
 			strlen( $baseline['site_url'] ) > 2048
 		) {
-			return new WP_Error( 'baseline_invalid_schema', __( 'The baseline metadata is malformed.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_schema', __( 'The saved-scan file details are invalid.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$site_url = self::normalize_site_url_value( $baseline['site_url'] );
 		if ( '' === $site_url ) {
-			return new WP_Error( 'baseline_invalid_schema', __( 'The baseline site URL is invalid.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_schema', __( 'The saved-scan site URL is invalid.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 		if ( $validate_site && ! hash_equals( self::normalized_site_url(), $site_url ) ) {
-			return new WP_Error( 'baseline_wrong_site', __( 'The baseline site URL does not match this WordPress site.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_wrong_site', __( 'This saved scan belongs to a different WordPress site.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$settings = self::validate_baseline_settings( $baseline['settings'] );
@@ -139,11 +139,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			$scope['total_items'] < 0 ||
 			$scope['total_items'] > self::MAX_BASELINE_CONTENT_ITEMS
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline scope is inconsistent with its scan settings.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved content scope does not match the scan settings.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 		$expected_limit = 'all' === $settings['content_scope'] ? null : $settings['max_posts'];
 		if ( $expected_limit !== $scope['content_limit'] ) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline content limit is inconsistent with its scan scope.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved content limit does not match the scan scope.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$stats = self::validate_baseline_stats( $baseline['stats'] );
@@ -171,7 +171,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			$completion['request_allowance_remaining'] !== $completion['request_limit'] - $completion['http_requests'] ||
 			$completion['http_requests'] !== $stats['http_requests']
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline completion or request-allowance evidence is inconsistent.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved completion or request-limit results are inconsistent.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		if (
@@ -182,7 +182,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! self::is_list_array( $baseline['results'] ) ||
 			count( $baseline['results'] ) > self::MAX_BASELINE_RESULTS
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline evidence collections are malformed or exceed their limits.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved results are invalid or exceed their limits.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$content_items = array();
@@ -213,7 +213,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			count( $results ) !== $stats['links_audited'] ||
 			$actionable_count !== $stats['actionable_issues']
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline counters do not match its saved evidence rows.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved totals do not match the saved link results.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return array(
@@ -256,13 +256,13 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function validate_baseline_settings( $settings ) {
 		$keys = array( 'post_types', 'old_domains', 'content_scope', 'max_posts', 'timeout', 'max_redirects' );
 		if ( ! is_array( $settings ) || ! self::array_has_exact_keys( $settings, $keys ) || ! is_array( $settings['post_types'] ) || ! self::is_list_array( $settings['post_types'] ) ) {
-			return new WP_Error( 'baseline_invalid_schema', __( 'The baseline scan settings are malformed.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_schema', __( 'The saved scan settings are invalid.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$post_types = array();
 		foreach ( $settings['post_types'] as $post_type ) {
 			if ( ! is_string( $post_type ) || ! preg_match( '/^[a-z0-9_-]{1,20}$/', $post_type ) || in_array( $post_type, $post_types, true ) ) {
-				return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline contains an invalid or duplicate content type.', 'indexlane-redirect-internal-link-auditor' ) );
+				return new WP_Error( 'baseline_invalid_evidence', __( 'The saved scan contains an invalid or duplicate content type.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 			$post_types[] = $post_type;
 		}
@@ -282,7 +282,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			$settings['max_redirects'] < 0 ||
 			$settings['max_redirects'] > 10
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline scan settings contain invalid values.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved scan settings contain invalid values.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return array(
@@ -304,13 +304,13 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function validate_baseline_stats( $stats ) {
 		$keys = array_keys( self::empty_stats() );
 		if ( ! is_array( $stats ) || ! self::array_has_exact_keys( $stats, $keys ) ) {
-			return new WP_Error( 'baseline_invalid_schema', __( 'The baseline scan counters are malformed.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_schema', __( 'The saved scan totals are invalid.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$normalized = array();
 		foreach ( $keys as $key ) {
 			if ( ! is_int( $stats[ $key ] ) || $stats[ $key ] < 0 || $stats[ $key ] > 1000000000 ) {
-				return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline contains an invalid scan counter.', 'indexlane-redirect-internal-link-auditor' ) );
+				return new WP_Error( 'baseline_invalid_evidence', __( 'The saved scan contains an invalid total.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 			$normalized[ $key ] = (int) $stats[ $key ];
 		}
@@ -336,7 +336,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! self::is_bounded_string( $item['url'], 2048 ) ||
 			! self::is_bounded_string( $item['edit_url'], 2048 )
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The baseline contains a malformed content item.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved scan contains an invalid content item.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return array(
@@ -357,12 +357,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function validate_baseline_result_row( $row ) {
 		$keys = array( 'source_id', 'source_title', 'source_type', 'source_url', 'source_edit_url', 'linked_url', 'http_status', 'redirect_count', 'final_url', 'warning', 'anchor_text', 'result', 'result_code', 'is_same_site', 'direct_target_id', 'final_target_id', 'coverage_target_id', 'link_kind_code' );
 		if ( ! is_array( $row ) || ! self::array_has_exact_keys( $row, $keys ) ) {
-			return new WP_Error( 'baseline_invalid_schema', __( 'A baseline occurrence row has unsupported fields.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_schema', __( 'A saved link result contains unsupported fields.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		foreach ( array( 'source_id', 'redirect_count', 'direct_target_id', 'final_target_id', 'coverage_target_id' ) as $integer_key ) {
 			if ( ! is_int( $row[ $integer_key ] ) || $row[ $integer_key ] < 0 ) {
-				return new WP_Error( 'baseline_invalid_evidence', __( 'A baseline occurrence row contains an invalid numeric value.', 'indexlane-redirect-internal-link-auditor' ) );
+				return new WP_Error( 'baseline_invalid_evidence', __( 'A saved link result contains an invalid number.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 		}
 
@@ -380,7 +380,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		);
 		foreach ( $string_limits as $string_key => $limit ) {
 			if ( ! self::is_bounded_string( $row[ $string_key ], $limit ) ) {
-				return new WP_Error( 'baseline_invalid_evidence', __( 'A baseline occurrence row contains invalid text evidence.', 'indexlane-redirect-internal-link-auditor' ) );
+				return new WP_Error( 'baseline_invalid_evidence', __( 'A saved link result contains invalid text.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 		}
 
@@ -393,7 +393,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! in_array( $row['link_kind_code'], array( 'direct', 'redirected' ), true ) ||
 			( $row['redirect_count'] > 0 ? 'redirected' : 'direct' ) !== $row['link_kind_code']
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'A baseline occurrence row contains inconsistent status or result evidence.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'A saved link result contains inconsistent status or outcome data.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$normalized = array();
@@ -411,12 +411,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 */
 	private static function parse_baseline_json( string $json ) {
 		if ( '' === $json || strlen( $json ) > self::MAX_BASELINE_FILE_SIZE ) {
-			return new WP_Error( 'baseline_too_large', __( 'The baseline JSON is empty or exceeds the 20 MiB limit.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_too_large', __( 'The saved-scan file is empty or larger than 20 MB.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$decoded = json_decode( $json, true, 512, JSON_BIGINT_AS_STRING );
 		if ( JSON_ERROR_NONE !== json_last_error() || ! is_array( $decoded ) ) {
-			return new WP_Error( 'baseline_invalid_json', __( 'The uploaded baseline is not valid JSON.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_json', __( 'The uploaded saved-scan file is not valid JSON.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return self::validate_baseline( $decoded, true );
@@ -429,7 +429,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 */
 	private static function read_uploaded_baseline() {
 		if ( ! isset( $_FILES['baseline_file'] ) || ! is_array( $_FILES['baseline_file'] ) ) {
-			return new WP_Error( 'baseline_missing_file', __( 'No baseline file was uploaded.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_missing_file', __( 'No saved-scan file was uploaded.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$file = $_FILES['baseline_file'];
@@ -439,14 +439,14 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! is_scalar( $file['name'] ) ||
 			! is_scalar( $file['tmp_name'] )
 		) {
-			return new WP_Error( 'baseline_missing_file', __( 'The baseline upload did not complete.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_missing_file', __( 'The saved-scan upload did not complete.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$size     = (int) $file['size'];
 		$name     = (string) $file['name'];
 		$tmp_name = (string) $file['tmp_name'];
 		if ( $size <= 0 || $size > self::MAX_BASELINE_FILE_SIZE ) {
-			return new WP_Error( 'baseline_too_large', __( 'The baseline upload is empty or exceeds the 20 MiB limit.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_too_large', __( 'The saved-scan upload is empty or larger than 20 MB.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 		if ( 'json' !== strtolower( (string) pathinfo( $name, PATHINFO_EXTENSION ) ) || ! is_uploaded_file( $tmp_name ) ) {
 			return new WP_Error( 'baseline_invalid_json', __( 'The selected upload is not a valid JSON file.', 'indexlane-redirect-internal-link-auditor' ) );
@@ -454,7 +454,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 
 		$json = file_get_contents( $tmp_name );
 		if ( ! is_string( $json ) || strlen( $json ) !== $size ) {
-			return new WP_Error( 'baseline_invalid_json', __( 'WordPress could not read the complete baseline upload.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_json', __( 'WordPress could not read the complete saved-scan upload.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return self::parse_baseline_json( $json );
@@ -508,7 +508,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 				'baseline_missing_post_type',
 				sprintf(
 					/* translators: %s: comma-separated post type slugs unavailable on the current site */
-					__( 'Verification cannot use the saved scope because these public content types are unavailable: %s.', 'indexlane-redirect-internal-link-auditor' ),
+					__( 'The fix check cannot use the saved scope because these public content types are unavailable: %s.', 'indexlane-redirect-internal-link-auditor' ),
 					implode( ', ', $missing )
 				)
 			);
@@ -516,7 +516,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 
 		$settings = self::get_request_settings( $baseline['settings'] );
 		if ( $settings['post_types'] !== $baseline['settings']['post_types'] ) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved baseline scope can no longer be reproduced exactly.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved scan scope can no longer be reproduced exactly.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return $settings;
@@ -608,12 +608,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 */
 	private static function get_session_comparison( array $session ) {
 		if ( 'complete' !== $session['status'] || ! isset( $session['scan_mode'] ) || 'verification' !== $session['scan_mode'] ) {
-			return new WP_Error( 'comparison_unavailable', __( 'A comparison is available only after a verification scan completes.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'comparison_unavailable', __( 'A comparison is available only after a fix check completes.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$baseline = self::get_saved_baseline();
 		if ( null === $baseline ) {
-			return new WP_Error( 'comparison_unavailable', __( 'The baseline used by this verification scan is no longer available.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'comparison_unavailable', __( 'The saved scan used by this fix check is no longer available.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		$baseline_id  = isset( $session['baseline_id'] ) ? (string) $session['baseline_id'] : '';
@@ -626,7 +626,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! hash_equals( (string) $baseline['baseline_id'], $baseline_id ) ||
 			! hash_equals( $current_hash, $fingerprint )
 		) {
-			return new WP_Error( 'comparison_unavailable', __( 'The saved baseline changed after this verification scan started, so the plugin will not show a misleading comparison.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'comparison_unavailable', __( 'The saved scan changed after this fix check started, so the plugin will not show an inaccurate comparison.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		return self::build_scan_comparison( $baseline['results'], $session['results'] );
@@ -880,7 +880,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			case 'new':
 				return __( 'New issue', 'indexlane-redirect-internal-link-auditor' );
 			case 'changed':
-				return __( 'Worsened or changed', 'indexlane-redirect-internal-link-auditor' );
+				return __( 'Changed issue', 'indexlane-redirect-internal-link-auditor' );
 			case 'resolved':
 				return __( 'Resolved', 'indexlane-redirect-internal-link-auditor' );
 			default:
@@ -894,7 +894,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function comparison_direction_label( string $direction ): string {
 		switch ( $direction ) {
 			case 'new':
-				return __( 'New regression', 'indexlane-redirect-internal-link-auditor' );
+				return __( 'New issue', 'indexlane-redirect-internal-link-auditor' );
 			case 'resolved':
 				return __( 'Resolved', 'indexlane-redirect-internal-link-auditor' );
 			case 'worsened':
@@ -904,7 +904,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			case 'changed':
 				return __( 'Changed behavior', 'indexlane-redirect-internal-link-auditor' );
 			default:
-				return __( 'Unchanged evidence', 'indexlane-redirect-internal-link-auditor' );
+				return __( 'No change', 'indexlane-redirect-internal-link-auditor' );
 		}
 	}
 
@@ -919,9 +919,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			'http_status_chain'     => __( 'HTTP status chain', 'indexlane-redirect-internal-link-auditor' ),
 			'redirect_count'        => __( 'redirect count', 'indexlane-redirect-internal-link-auditor' ),
 			'final_url'             => __( 'final URL', 'indexlane-redirect-internal-link-auditor' ),
-			'result_code'           => __( 'result severity', 'indexlane-redirect-internal-link-auditor' ),
-			'occurrence_count'      => __( 'occurrence count', 'indexlane-redirect-internal-link-auditor' ),
-			'affected_source_count' => __( 'affected-source count', 'indexlane-redirect-internal-link-auditor' ),
+			'result_code'           => __( 'outcome', 'indexlane-redirect-internal-link-auditor' ),
+			'occurrence_count'      => __( 'times linked', 'indexlane-redirect-internal-link-auditor' ),
+			'affected_source_count' => __( 'content items affected', 'indexlane-redirect-internal-link-auditor' ),
 		);
 
 		$output = array();
@@ -963,29 +963,39 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	}
 
 	/**
-	 * Human-readable completion and request-limit metadata.
+	 * Format the saved scan time using this site's date and time settings.
 	 *
 	 * @param array<string,mixed> $baseline Baseline.
 	 */
-	private static function baseline_completion_label( array $baseline ): string {
-		return sprintf(
-			/* translators: 1: processed content count, 2: total content count, 3: HTTP request count, 4: request limit, 5: allowance extension count */
-			__( 'Complete: %1$d of %2$d content items; %3$d of %4$d requests; %5$d allowance extensions.', 'indexlane-redirect-internal-link-auditor' ),
-			(int) $baseline['stats']['content_items_processed'],
-			(int) $baseline['scope']['total_items'],
-			(int) $baseline['completion']['http_requests'],
-			(int) $baseline['completion']['request_limit'],
-			(int) $baseline['completion']['request_allowance_extensions']
-		);
+	private static function baseline_scan_date_label( array $baseline ): string {
+		$scan_time = (string) $baseline['scan_utc'];
+		$timestamp = strtotime( $scan_time );
+		if ( false === $timestamp ) {
+			return $scan_time;
+		}
+
+		$date_format = (string) get_option( 'date_format', 'F j, Y' );
+		$time_format = (string) get_option( 'time_format', 'g:i a' );
+
+		return wp_date( $date_format . ' ' . $time_format, $timestamp );
 	}
 
 	/**
-	 * Human-readable evidence size and issue destination count.
+	 * Count unique saved URLs that need attention.
 	 *
 	 * @param array<string,mixed> $baseline Baseline.
 	 */
-	private static function baseline_evidence_label( array $baseline ): string {
-		$destinations = self::build_destination_comparison_evidence( $baseline['results'] );
+	private static function baseline_issue_url_count( array $baseline ): int {
+		return self::issue_url_count( $baseline['results'] );
+	}
+
+	/**
+	 * Count unique URLs with a non-OK result.
+	 *
+	 * @param array<int,array<string,mixed>> $results Scan result rows.
+	 */
+	private static function issue_url_count( array $results ): int {
+		$destinations = self::build_destination_comparison_evidence( $results );
 		$issues       = array_filter(
 			$destinations,
 			static function ( array $evidence ): bool {
@@ -993,12 +1003,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			}
 		);
 
-		return sprintf(
-			/* translators: 1: occurrence row count, 2: issue destination count */
-			__( '%1$d occurrence rows; %2$d destinations with issues.', 'indexlane-redirect-internal-link-auditor' ),
-			count( $baseline['results'] ),
-			count( $issues )
-		);
+		return count( $issues );
 	}
 
 	/**
@@ -1047,7 +1052,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function send_baseline_json( array $baseline ): void {
 		$json = wp_json_encode( $baseline, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
 		if ( ! is_string( $json ) ) {
-			wp_die( esc_html__( 'WordPress could not encode the baseline evidence.', 'indexlane-redirect-internal-link-auditor' ) );
+			wp_die( esc_html__( 'WordPress could not create the saved-scan download.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
 		nocache_headers();
@@ -1055,7 +1060,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		header( 'X-Content-Type-Options: nosniff' );
 		$scan_time = preg_replace( '/[^0-9]/', '', (string) $baseline['scan_utc'] );
 		$scan_time = is_string( $scan_time ) && '' !== $scan_time ? $scan_time : gmdate( 'YmdHis' );
-		header( 'Content-Disposition: attachment; filename=indexlane-redirect-internal-link-auditor-baseline-' . $scan_time . '.json' );
+		header( 'Content-Disposition: attachment; filename=indexlane-redirect-internal-link-auditor-saved-scan-' . $scan_time . '.json' );
 		echo $json; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- Validated JSON download, not HTML.
 		exit;
 	}
@@ -1091,22 +1096,22 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function build_comparison_csv_rows( array $comparison ): array {
 		$rows = array(
 			array(
-				self::csv_safe( __( 'Category', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Change', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Destination', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Changed Evidence', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Baseline HTTP Status Chain', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Verification HTTP Status Chain', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Baseline Redirect Count', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Verification Redirect Count', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Baseline Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Verification Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Baseline Result Severity', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Verification Result Severity', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Baseline Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Verification Occurrences', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Baseline Affected Content Items', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Verification Affected Content Items', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'URL', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Changed Fields', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan HTTP Status Chain', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan HTTP Status Chain', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Redirect Count', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Redirect Count', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Content Items Affected', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Content Items Affected', 'indexlane-redirect-internal-link-auditor' ) ),
 			),
 		);
 
