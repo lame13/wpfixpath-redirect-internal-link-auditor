@@ -12,6 +12,7 @@ define( 'ABSPATH', __DIR__ . '/' );
 $GLOBALS['indexlane_test_http_calls'] = array();
 $GLOBALS['indexlane_test_responses']  = array();
 $GLOBALS['indexlane_test_transients'] = array();
+$GLOBALS['indexlane_test_user_options'] = array();
 $GLOBALS['indexlane_test_user_id']    = 7;
 $GLOBALS['indexlane_test_uuid_count'] = 0;
 $GLOBALS['indexlane_test_translations'] = array();
@@ -20,13 +21,22 @@ $GLOBALS['indexlane_test_admin_pages']  = array();
 $GLOBALS['indexlane_test_styles']       = array();
 $GLOBALS['indexlane_test_scripts']      = array();
 $GLOBALS['indexlane_test_localizations'] = array();
+$GLOBALS['indexlane_test_plugin_url_files'] = array();
 
 class WP_Error {
 	/** @var string */
+	private $code;
+
+	/** @var string */
 	private $message;
 
-	public function __construct( string $message ) {
-		$this->message = $message;
+	public function __construct( string $code = '', string $message = '' ) {
+		$this->code    = '' === $message ? 'error' : $code;
+		$this->message = '' === $message ? $code : $message;
+	}
+
+	public function get_error_code(): string {
+		return $this->code;
 	}
 
 	public function get_error_message(): string {
@@ -49,6 +59,7 @@ function add_management_page( string $page_title, string $menu_title, string $ca
 	return 'tools_page_' . $menu_slug;
 }
 function plugins_url( string $path, string $plugin_file = '' ): string {
+	$GLOBALS['indexlane_test_plugin_url_files'][] = $plugin_file;
 	return 'https://example.test/wp-content/plugins/indexlane-redirect-internal-link-auditor/' . ltrim( $path, '/' );
 }
 function wp_enqueue_style( string $handle, string $src, array $dependencies = array(), string $version = '' ): void {
@@ -88,8 +99,39 @@ function plugin_basename( string $file ): string {
 function home_url(): string {
 	return 'https://example.test/';
 }
+function get_post_types( array $args = array(), string $output = 'names' ): array {
+	$objects = array();
+	foreach ( array( 'post' => 'Posts', 'page' => 'Pages', 'indexlane_fixture' => 'Audit fixtures' ) as $name => $label ) {
+		$object                        = new stdClass();
+		$object->labels                = new stdClass();
+		$object->labels->name          = $label;
+		$object->labels->singular_name = rtrim( $label, 's' );
+		$objects[ $name ]              = $object;
+	}
+
+	return 'objects' === $output ? $objects : array_keys( $objects );
+}
+function get_post_type_object( string $post_type ) {
+	$objects = get_post_types( array( 'public' => true ), 'objects' );
+	return isset( $objects[ $post_type ] ) ? $objects[ $post_type ] : null;
+}
 function wp_parse_url( string $url, int $component = -1 ) {
 	return -1 === $component ? parse_url( $url ) : parse_url( $url, $component );
+}
+function sanitize_key( string $value ): string {
+	return preg_replace( '/[^a-z0-9_-]/', '', strtolower( $value ) );
+}
+function sanitize_textarea_field( string $value ): string {
+	return trim( str_replace( "\0", '', $value ) );
+}
+function sanitize_text_field( string $value ): string {
+	return trim( strip_tags( str_replace( "\0", '', $value ) ) );
+}
+function absint( $value ): int {
+	return abs( (int) $value );
+}
+function wp_json_encode( $value, int $flags = 0 ) {
+	return json_encode( $value, $flags );
 }
 function __( string $text ): string {
 	return isset( $GLOBALS['indexlane_test_translations'][ $text ] )
@@ -126,6 +168,23 @@ function wp_generate_uuid4(): string {
 }
 function get_current_user_id(): int {
 	return (int) $GLOBALS['indexlane_test_user_id'];
+}
+function get_user_option( string $option, int $user_id = 0 ) {
+	$user_id = $user_id > 0 ? $user_id : get_current_user_id();
+	return isset( $GLOBALS['indexlane_test_user_options'][ $user_id ][ $option ] )
+		? $GLOBALS['indexlane_test_user_options'][ $user_id ][ $option ]
+		: false;
+}
+function update_user_option( int $user_id, string $option, $value, bool $global = false ) {
+	$GLOBALS['indexlane_test_user_options'][ $user_id ][ $option ] = $value;
+	return true;
+}
+function delete_user_option( int $user_id, string $option, bool $global = false ): bool {
+	if ( ! isset( $GLOBALS['indexlane_test_user_options'][ $user_id ][ $option ] ) ) {
+		return false;
+	}
+	unset( $GLOBALS['indexlane_test_user_options'][ $user_id ][ $option ] );
+	return true;
 }
 function set_transient( string $key, $value, int $expiration ): bool {
 	$GLOBALS['indexlane_test_transients'][ $key ] = array(
@@ -170,6 +229,38 @@ function indexlane_assert_same( $expected, $actual, string $message ): void {
 	}
 }
 
+$repository_root  = dirname( __DIR__ );
+$plugin_source    = file_get_contents( $repository_root . '/indexlane-redirect-internal-link-auditor.php' );
+$readme_source    = file_get_contents( $repository_root . '/readme.txt' );
+$changelog_source = file_get_contents( $repository_root . '/CHANGELOG.md' );
+if ( false === $plugin_source || false === $readme_source || false === $changelog_source ) {
+	fwrite( STDERR, "Release metadata files could not be read.\n" );
+	exit( 1 );
+}
+if ( ! preg_match( '/^[ \t]*\*[ \t]*Version:[ \t]*([^\s]+)[ \t]*$/m', $plugin_source, $plugin_version_match ) ) {
+	fwrite( STDERR, "The plugin header version could not be read.\n" );
+	exit( 1 );
+}
+if ( ! preg_match( '/^Stable tag:[ \t]*([^\s]+)[ \t]*$/m', $readme_source, $stable_tag_match ) ) {
+	fwrite( STDERR, "The WordPress.org stable tag could not be read.\n" );
+	exit( 1 );
+}
+if ( ! preg_match( '/^##[ \t]+([0-9]+\.[0-9]+\.[0-9]+)[ \t]+-/m', $changelog_source, $changelog_version_match ) ) {
+	fwrite( STDERR, "The latest root changelog version could not be read.\n" );
+	exit( 1 );
+}
+if ( ! preg_match( '/^=[ \t]+([0-9]+\.[0-9]+\.[0-9]+)[ \t]+=$/m', $readme_source, $readme_changelog_version_match ) ) {
+	fwrite( STDERR, "The latest WordPress.org changelog version could not be read.\n" );
+	exit( 1 );
+}
+
+$release_version   = (string) $plugin_version_match[1];
+$plugin_reflection = new ReflectionClass( 'IndexLane_Redirect_Internal_Link_Auditor' );
+indexlane_assert_same( $release_version, $plugin_reflection->getConstant( 'VERSION' ), 'The internal plugin version must match the plugin header.' );
+indexlane_assert_same( $release_version, (string) $stable_tag_match[1], 'The WordPress.org stable tag must match the plugin header.' );
+indexlane_assert_same( $release_version, (string) $changelog_version_match[1], 'The latest root changelog entry must match the plugin header.' );
+indexlane_assert_same( $release_version, (string) $readme_changelog_version_match[1], 'The latest WordPress.org changelog entry must match the plugin header.' );
+
 function indexlane_response( int $status, string $location = '' ): array {
 	return array(
 		'response' => array( 'code' => $status ),
@@ -181,6 +272,13 @@ function indexlane_response( int $status, string $location = '' ): array {
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['admin_menu'] ), 'The Tools page must be registered on admin_menu.' );
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['admin_enqueue_scripts'] ), 'Admin styles must use admin_enqueue_scripts.' );
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['admin_init'] ), 'CSV exports must remain registered on admin_init.' );
+$admin_init_methods = array_map(
+	static function ( array $callback ): string {
+		return isset( $callback[1] ) ? (string) $callback[1] : '';
+	},
+	$GLOBALS['indexlane_test_actions']['admin_init']
+);
+indexlane_assert_same( true, in_array( 'maybe_handle_baseline_action', $admin_init_methods, true ), 'Baseline management must use a capability- and nonce-protected admin request.' );
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['wp_ajax_indexlane_rila_start_scan'] ), 'Starting a scan must use authenticated WordPress AJAX.' );
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['wp_ajax_indexlane_rila_run_batch'] ), 'Scan batches must use authenticated WordPress AJAX.' );
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['wp_ajax_indexlane_rila_control_scan'] ), 'Scan controls must use authenticated WordPress AJAX.' );
@@ -203,7 +301,7 @@ indexlane_assert_same(
 			'handle'       => 'indexlane-rila-admin',
 			'src'          => 'https://example.test/wp-content/plugins/indexlane-redirect-internal-link-auditor/assets/admin.css',
 			'dependencies' => array(),
-			'version'      => '0.4.0',
+			'version'      => $release_version,
 		),
 	),
 	$GLOBALS['indexlane_test_styles'],
@@ -215,12 +313,18 @@ indexlane_assert_same(
 			'handle'       => 'indexlane-rila-admin',
 			'src'          => 'https://example.test/wp-content/plugins/indexlane-redirect-internal-link-auditor/assets/admin.js',
 			'dependencies' => array(),
-			'version'      => '0.4.0',
+			'version'      => $release_version,
 			'in_footer'    => true,
 		),
 	),
 	$GLOBALS['indexlane_test_scripts'],
 	'The authenticated batch controller must load with the release version only on its Tools page.'
+);
+$expected_plugin_file = dirname( __DIR__ ) . '/indexlane-redirect-internal-link-auditor.php';
+indexlane_assert_same(
+	array( $expected_plugin_file, $expected_plugin_file ),
+	$GLOBALS['indexlane_test_plugin_url_files'],
+	'Admin assets must resolve relative to the root plugin bootstrap after the class is split into include files.'
 );
 indexlane_assert_same( 'IndexLaneRila', $GLOBALS['indexlane_test_localizations'][0]['object_name'], 'The browser controller must receive its nonce and persisted session summary.' );
 
@@ -241,8 +345,18 @@ function indexlane_result_row(
 	string $anchor_text = 'Link',
 	array $extra = array()
 ): array {
+	$result_codes = array(
+		'OK'           => 'ok',
+		'Warning'      => 'warning',
+		'Needs review' => 'needs_review',
+		'Blocked'      => 'blocked',
+		'Error'        => 'error',
+	);
+	$result_code  = isset( $result_codes[ $result ] ) ? $result_codes[ $result ] : 'needs_review';
+
 	return array_merge(
 		array(
+			'source_id'       => 0,
 			'source_title'    => $source_title,
 			'source_type'     => 'Page',
 			'source_url'      => $source_url,
@@ -254,6 +368,12 @@ function indexlane_result_row(
 			'warning'         => $warning,
 			'anchor_text'     => $anchor_text,
 			'result'          => $result,
+			'result_code'     => $result_code,
+			'is_same_site'    => true,
+			'direct_target_id' => 0,
+			'final_target_id'  => 0,
+			'coverage_target_id' => 0,
+			'link_kind_code'   => $redirect_count > 0 ? 'redirected' : 'direct',
 		),
 		$extra
 	);
@@ -640,6 +760,164 @@ indexlane_assert_same(
 	'The coverage CSV should export exact incoming, outgoing, anchor, self-link, and direct/redirect metrics.'
 );
 
+$comparison_old = array(
+	indexlane_result_row( 'https://example.test/source-a', 'https://example.test/regression', '200', 0, 'https://example.test/regression', 'None', 'OK' ),
+	indexlane_result_row( 'https://example.test/source-b', 'https://example.test/resolved', '404', 0, 'https://example.test/resolved', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-c', 'https://example.test/changed', '301 -> 200', 1, 'https://example.test/old-final', 'Redirect (301)', 'Warning' ),
+	indexlane_result_row( 'https://example.test/source-d', 'https://example.test/many', '404', 0, 'https://example.test/many', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-e', 'https://example.test/many', '404', 0, 'https://example.test/many', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-f', 'https://example.test/many', '404', 0, 'https://example.test/many', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-g', 'https://example.test/still', '404', 0, 'https://example.test/still', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-h', 'https://example.test/cleanup', '301 -> 200', 1, 'https://example.test/clean', 'Redirect (301)', 'Warning' ),
+);
+$comparison_new = array(
+	indexlane_result_row( 'https://example.test/source-a', 'https://example.test/regression', '404', 0, 'https://example.test/regression', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-b', 'https://example.test/resolved', '200', 0, 'https://example.test/resolved', 'None', 'OK' ),
+	indexlane_result_row( 'https://example.test/source-c', 'https://example.test/changed', '301 -> 200', 1, 'https://example.test/different-final', 'Redirect (301)', 'Warning' ),
+	indexlane_result_row( 'https://example.test/source-d', 'https://example.test/many', '404', 0, 'https://example.test/many', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-g', 'https://example.test/still', '404', 0, 'https://example.test/still', 'Broken link (404)', 'Error' ),
+	indexlane_result_row( 'https://example.test/source-h', 'https://example.test/cleanup', '200', 0, 'https://example.test/cleanup', 'None', 'OK' ),
+);
+
+$http_calls_before_comparison = count( $GLOBALS['indexlane_test_http_calls'] );
+$comparison = indexlane_invoke( 'build_scan_comparison', array( $comparison_old, $comparison_new ) );
+indexlane_assert_same( $http_calls_before_comparison, count( $GLOBALS['indexlane_test_http_calls'] ), 'Baseline comparison must derive only from saved evidence.' );
+indexlane_assert_same(
+	array( 'new' => 1, 'changed' => 2, 'resolved' => 2, 'still' => 1 ),
+	$comparison['summary'],
+	'Comparison summaries must use the four planned remediation categories.'
+);
+$comparison_by_url = array_column( $comparison['rows'], null, 'destination_url' );
+indexlane_assert_same( 'new', $comparison_by_url['https://example.test/regression']['category'], 'A healthy destination becoming 404 must be a new issue.' );
+indexlane_assert_same( '200', $comparison_by_url['https://example.test/regression']['old']['http_status_chain'], 'New issues must retain the healthy baseline status chain.' );
+indexlane_assert_same( '404', $comparison_by_url['https://example.test/regression']['new']['http_status_chain'], 'New issues must retain the regressed verification status chain.' );
+indexlane_assert_same( 'resolved', $comparison_by_url['https://example.test/resolved']['category'], 'A 404 becoming 200 must be resolved.' );
+indexlane_assert_same( 'resolved', $comparison_by_url['https://example.test/cleanup']['category'], 'A redirected link cleaned to a direct 200 must be resolved.' );
+indexlane_assert_same( 'changed', $comparison_by_url['https://example.test/changed']['category'], 'A redirect changing final URL must retain changed behavior.' );
+indexlane_assert_same( true, in_array( 'final_url', $comparison_by_url['https://example.test/changed']['changed_fields'], true ), 'Changed final URLs must be named as changed evidence.' );
+indexlane_assert_same( 'improved', $comparison_by_url['https://example.test/many']['direction'], 'A broken destination dropping from three sources to one must be improved but still present.' );
+indexlane_assert_same( 3, $comparison_by_url['https://example.test/many']['old']['affected_source_count'], 'Baseline affected-source counts must be exact.' );
+indexlane_assert_same( 1, $comparison_by_url['https://example.test/many']['new']['affected_source_count'], 'Verification affected-source counts must be exact.' );
+indexlane_assert_same( 'still', $comparison_by_url['https://example.test/still']['category'], 'Unchanged issue evidence must remain still present.' );
+
+$comparison_csv = indexlane_invoke( 'build_comparison_csv_rows', array( $comparison ) );
+indexlane_assert_same( 7, count( $comparison_csv ), 'Comparison CSV must contain every compared issue destination plus its header.' );
+indexlane_assert_same( 'Category', $comparison_csv[0][0], 'Comparison CSV must begin with its category.' );
+indexlane_assert_same( 'Baseline HTTP Status Chain', $comparison_csv[0][4], 'Comparison CSV must expose old status evidence explicitly.' );
+indexlane_assert_same( 'Verification Affected Content Items', $comparison_csv[0][15], 'Comparison CSV must expose new affected-source evidence explicitly.' );
+
+$baseline_content_items = array(
+	array(
+		'id'       => 10,
+		'title'    => 'Baseline source one',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/source-a',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=10&action=edit',
+	),
+	array(
+		'id'       => 11,
+		'title'    => 'Baseline source two',
+		'type'     => 'Page',
+		'url'      => 'https://example.test/source-b',
+		'edit_url' => 'https://example.test/wp-admin/post.php?post=11&action=edit',
+	),
+);
+$baseline_stats = array(
+	'content_items_processed'    => 2,
+	'links_extracted'             => count( $comparison_old ),
+	'links_audited'               => count( $comparison_old ),
+	'skipped_external'            => 0,
+	'unique_destinations_checked' => 6,
+	'http_requests'               => 6,
+	'actionable_issues'           => 7,
+);
+$baseline_session = array(
+	'schema_version'              => 3,
+	'id'                          => '12345678-1234-4abc-8def-000000000050',
+	'status'                      => 'complete',
+	'created_at'                  => time() - 60,
+	'updated_at'                  => time(),
+	'expires_at'                  => time() + 86400,
+	'scan_mode'                   => 'standard',
+	'baseline_id'                 => '',
+	'baseline_fingerprint'        => '',
+	'settings'                    => array(
+		'post_types'       => array( 'post', 'page' ),
+		'old_domains'      => 'legacy.example',
+		'old_domain_hosts' => array( 'legacy.example' ),
+		'content_scope'    => 'all',
+		'max_posts'        => 100,
+		'timeout'          => 5.0,
+		'max_redirects'    => 5,
+	),
+	'total_items'                 => 2,
+	'snapshot_max_id'             => 11,
+	'cursor_before_id'            => 10,
+	'content_done'                => true,
+	'request_limit'               => 250,
+	'request_allowance_extensions' => 0,
+	'stats'                       => $baseline_stats,
+	'content_items'               => $baseline_content_items,
+	'results'                     => $comparison_old,
+	'checked_urls'                => array(),
+	'pending_checks'              => array(),
+);
+
+$baseline = indexlane_invoke( 'build_baseline_from_session', array( $baseline_session ) );
+indexlane_assert_same( false, is_wp_error( $baseline ), 'A complete consistent scan must produce portable baseline evidence.' );
+indexlane_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'Baseline JSON must identify its document format.' );
+indexlane_assert_same( 1, $baseline['schema_version'], 'Baseline JSON must carry an explicit schema version.' );
+indexlane_assert_same( '0.5.0', $baseline['plugin_version'], 'Baseline metadata must identify the plugin version.' );
+indexlane_assert_same( 'https://example.test', $baseline['site_url'], 'Baseline site ownership must use a normalized exact home URL.' );
+indexlane_assert_same( true, $baseline['completion']['complete'], 'Only complete evidence may be saved as a baseline.' );
+indexlane_assert_same( 0, $baseline['completion']['request_allowance_extensions'], 'Baseline metadata must preserve the request-limit extension state.' );
+
+$baseline_json   = wp_json_encode( $baseline, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+$parsed_baseline = indexlane_invoke( 'parse_baseline_json', array( $baseline_json ) );
+indexlane_assert_same( $baseline, $parsed_baseline, 'Exported baseline JSON must round-trip through strict import validation.' );
+
+$wrong_site             = $baseline;
+$wrong_site['site_url'] = 'https://other.example';
+$wrong_site_result      = indexlane_invoke( 'validate_baseline', array( $wrong_site, true ) );
+indexlane_assert_same( true, is_wp_error( $wrong_site_result ), 'A baseline from another site must be rejected.' );
+indexlane_assert_same( 'baseline_wrong_site', $wrong_site_result->get_error_code(), 'Site mismatch must have a specific validation code.' );
+
+$unknown_field               = $baseline;
+$unknown_field['unexpected'] = true;
+$unknown_field_result        = indexlane_invoke( 'validate_baseline', array( $unknown_field, true ) );
+indexlane_assert_same( 'baseline_invalid_schema', $unknown_field_result->get_error_code(), 'Strict schema validation must reject unknown top-level fields.' );
+
+$inconsistent_stats                                  = $baseline;
+$inconsistent_stats['stats']['actionable_issues']    = 6;
+$inconsistent_stats_result = indexlane_invoke( 'validate_baseline', array( $inconsistent_stats, true ) );
+indexlane_assert_same( 'baseline_invalid_evidence', $inconsistent_stats_result->get_error_code(), 'Import must reject counters that disagree with occurrence evidence.' );
+
+indexlane_assert_same( true, indexlane_invoke( 'save_baseline', array( $baseline ) ), 'One validated baseline must persist for the current administrator.' );
+indexlane_assert_same( $baseline, indexlane_invoke( 'get_saved_baseline' ), 'The owning administrator must load the exact canonical baseline.' );
+$GLOBALS['indexlane_test_user_id'] = 8;
+indexlane_assert_same( null, indexlane_invoke( 'get_saved_baseline' ), 'Another administrator must not see the saved baseline.' );
+$GLOBALS['indexlane_test_user_id'] = 7;
+
+$verification_settings = indexlane_invoke( 'verification_settings_from_baseline', array( $baseline ) );
+indexlane_assert_same( false, is_wp_error( $verification_settings ), 'A verification scan must reproduce currently available baseline scope.' );
+indexlane_assert_same( $baseline['settings']['post_types'], $verification_settings['post_types'], 'Verification must retain the exact saved post types.' );
+indexlane_assert_same( $baseline['settings']['content_scope'], $verification_settings['content_scope'], 'Verification must retain the exact saved content scope.' );
+
+$verification_session                         = $baseline_session;
+$verification_session['id']                   = '12345678-1234-4abc-8def-000000000051';
+$verification_session['scan_mode']            = 'verification';
+$verification_session['baseline_id']          = $baseline['baseline_id'];
+$verification_session['baseline_fingerprint'] = indexlane_invoke( 'baseline_fingerprint', array( $baseline ) );
+$verification_session['results']              = $comparison_new;
+$verification_session['stats']['links_extracted']  = count( $comparison_new );
+$verification_session['stats']['links_audited']    = count( $comparison_new );
+$verification_session['stats']['actionable_issues'] = 4;
+$stored_comparison = indexlane_invoke( 'get_session_comparison', array( $verification_session ) );
+indexlane_assert_same( $comparison['summary'], $stored_comparison['summary'], 'Completed verification must compare against the exact saved baseline fingerprint.' );
+$verification_session['baseline_fingerprint'] = str_repeat( '0', 64 );
+$stale_comparison = indexlane_invoke( 'get_session_comparison', array( $verification_session ) );
+indexlane_assert_same( true, is_wp_error( $stale_comparison ), 'A changed baseline must invalidate a stale verification comparison.' );
+
 $GLOBALS['indexlane_test_http_calls'] = array();
 $GLOBALS['indexlane_test_responses']  = array(
 	'https://example.test/foo'  => indexlane_response( 301, '/foo/' ),
@@ -698,8 +976,11 @@ for ( $i = 1; $i <= 6; $i++ ) {
 }
 
 $batch_session = array(
-	'schema_version'   => 2,
+	'schema_version'   => 3,
 	'id'               => '12345678-1234-4abc-8def-000000000010',
+	'scan_mode'        => 'standard',
+	'baseline_id'      => '',
+	'baseline_fingerprint' => '',
 	'status'           => 'running',
 	'created_at'       => time(),
 	'updated_at'       => time(),
@@ -708,6 +989,7 @@ $batch_session = array(
 	'total_items'      => 1,
 	'content_done'     => true,
 	'request_limit'    => 250,
+	'request_allowance_extensions' => 0,
 	'stats'            => indexlane_invoke( 'empty_stats' ),
 	'content_items'    => array(),
 	'results'          => array(),

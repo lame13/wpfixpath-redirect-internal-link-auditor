@@ -5,12 +5,14 @@
 .indexlane-rila-wrap > p,
 .indexlane-rila-wrap > .notice,
 .indexlane-rila-form,
-.indexlane-rila-session {
+.indexlane-rila-session,
+.indexlane-rila-baseline {
 	max-width: 1080px;
 }
 
 .indexlane-rila-form,
-.indexlane-rila-session {
+.indexlane-rila-session,
+.indexlane-rila-baseline {
 	box-sizing: border-box;
 	margin-top: 20px;
 	padding: 8px 24px 2px;
@@ -21,6 +23,133 @@
 
 .indexlane-rila-form.is-disabled {
 	opacity: 0.66;
+}
+
+.indexlane-rila-baseline {
+	padding: 20px 24px 22px;
+	border-left: 4px solid #8c8f94;
+}
+
+.indexlane-rila-baseline-heading {
+	display: flex;
+	align-items: flex-start;
+	justify-content: space-between;
+	gap: 20px;
+}
+
+.indexlane-rila-baseline-heading h2,
+.indexlane-rila-baseline-heading p {
+	margin-top: 0;
+}
+
+.indexlane-rila-baseline-heading p {
+	margin-bottom: 0;
+}
+
+.indexlane-rila-baseline-state {
+	flex: 0 0 auto;
+	padding: 4px 9px;
+	border-radius: 12px;
+	background: #f0f0f1;
+	color: #3c434a;
+	font-weight: 600;
+}
+
+.indexlane-rila-baseline-state.is-ready {
+	background: #edfaef;
+	color: #146c2e;
+}
+
+.indexlane-rila-baseline-metadata {
+	display: grid;
+	grid-template-columns: repeat( 3, minmax( 0, 1fr ) );
+	gap: 1px;
+	margin: 20px 0;
+	border: 1px solid #dcdcde;
+	background: #dcdcde;
+}
+
+.indexlane-rila-baseline-metadata > div {
+	min-height: 72px;
+	padding: 12px 14px;
+	background: #f6f7f7;
+}
+
+.indexlane-rila-baseline-metadata dt {
+	margin-bottom: 4px;
+	color: #50575e;
+	font-size: 12px;
+	font-weight: 600;
+	text-transform: uppercase;
+}
+
+.indexlane-rila-baseline-metadata dd {
+	margin: 0;
+	overflow-wrap: anywhere;
+}
+
+.indexlane-rila-baseline-actions,
+.indexlane-rila-save-baseline {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px 12px;
+}
+
+.indexlane-rila-save-baseline {
+	max-width: 1080px;
+	margin: 0 0 24px;
+	padding: 14px 16px;
+	border-left: 4px solid #2271b1;
+	background: #f0f6fc;
+}
+
+.indexlane-rila-save-baseline label,
+.indexlane-rila-save-baseline .description {
+	flex-basis: 100%;
+}
+
+.indexlane-rila-baseline-current {
+	max-width: 1048px;
+	margin: 0 0 24px;
+	padding: 10px 12px;
+	border-left: 4px solid #00a32a;
+	background: #edfaef;
+}
+
+.indexlane-rila-baseline-secondary {
+	margin-top: 18px;
+	padding-top: 14px;
+	border-top: 1px solid #dcdcde;
+}
+
+.indexlane-rila-baseline-secondary > summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.indexlane-rila-import-baseline,
+.indexlane-rila-delete-baseline {
+	margin-top: 16px;
+	padding: 14px;
+	border: 1px solid #dcdcde;
+	background: #f6f7f7;
+}
+
+.indexlane-rila-import-baseline > label:first-of-type,
+.indexlane-rila-import-baseline > input[type="file"],
+.indexlane-rila-confirmation {
+	display: block;
+	margin-bottom: 10px;
+}
+
+.indexlane-rila-import-baseline > label:first-of-type {
+	font-weight: 600;
+}
+
+.indexlane-rila-delete-baseline {
+	border-color: #f0c5c8;
+	background: #fcf0f1;
 }
 
 .indexlane-rila-wrap .indexlane-rila-checkbox,
@@ -143,6 +272,118 @@
 
 .indexlane-rila-results {
 	margin-top: 28px;
+}
+
+.indexlane-rila-comparison {
+	margin: 32px 0 38px;
+}
+
+.indexlane-rila-comparison > h2 {
+	margin-bottom: 6px;
+}
+
+.indexlane-rila-comparison-summary {
+	display: grid;
+	grid-template-columns: repeat( 4, minmax( 150px, 1fr ) );
+	gap: 1px;
+	max-width: 980px;
+	margin: 18px 0;
+	border: 1px solid #dcdcde;
+	background: #dcdcde;
+}
+
+.indexlane-rila-comparison-summary > div {
+	min-height: 72px;
+	padding: 12px 14px;
+	background: #f6f7f7;
+}
+
+.indexlane-rila-comparison-summary strong,
+.indexlane-rila-comparison-summary span {
+	display: block;
+}
+
+.indexlane-rila-comparison-summary strong {
+	margin-bottom: 4px;
+	font-size: 24px;
+	font-variant-numeric: tabular-nums;
+}
+
+.indexlane-rila-comparison-summary .is-new {
+	border-top: 3px solid #d63638;
+}
+
+.indexlane-rila-comparison-summary .is-changed {
+	border-top: 3px solid #dba617;
+}
+
+.indexlane-rila-comparison-summary .is-resolved {
+	border-top: 3px solid #00a32a;
+}
+
+.indexlane-rila-comparison-summary .is-still {
+	border-top: 3px solid #8c8f94;
+}
+
+.indexlane-rila-comparison-category {
+	display: inline-block;
+	padding: 3px 8px;
+	border-radius: 12px;
+	background: #f0f0f1;
+	font-weight: 600;
+}
+
+.indexlane-rila-comparison-category.is-new {
+	background: #fcf0f1;
+	color: #8a2424;
+}
+
+.indexlane-rila-comparison-category.is-changed {
+	background: #fcf3cf;
+	color: #6e4b00;
+}
+
+.indexlane-rila-comparison-category.is-resolved {
+	background: #edfaef;
+	color: #146c2e;
+}
+
+.indexlane-rila-comparison-fields,
+.indexlane-rila-comparison-old,
+.indexlane-rila-comparison-new,
+.indexlane-rila-comparison-old > span,
+.indexlane-rila-comparison-new > span {
+	display: block;
+}
+
+.indexlane-rila-comparison-fields {
+	margin-top: 4px;
+	color: #646970;
+	font-size: 12px;
+}
+
+.indexlane-rila-comparison-old,
+.indexlane-rila-comparison-new {
+	padding: 5px 6px;
+	overflow-wrap: anywhere;
+}
+
+.indexlane-rila-comparison-old {
+	margin-bottom: 4px;
+	background: #f0f0f1;
+}
+
+.indexlane-rila-comparison-new {
+	background: #f0f6fc;
+}
+
+.indexlane-rila-comparison-old > span,
+.indexlane-rila-comparison-new > span {
+	margin-bottom: 2px;
+	color: #646970;
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
 }
 
 .indexlane-rila-results table {
@@ -302,6 +543,10 @@
 	min-width: 1380px;
 }
 
+.indexlane-rila-table-scroll .indexlane-rila-comparison-table {
+	min-width: 1780px;
+}
+
 .indexlane-rila-results td,
 .indexlane-rila-results th {
 	vertical-align: top;
@@ -329,6 +574,11 @@
 		grid-template-columns: repeat( 2, minmax( 140px, 1fr ) );
 	}
 
+	.indexlane-rila-baseline-metadata,
+	.indexlane-rila-comparison-summary {
+		grid-template-columns: repeat( 2, minmax( 140px, 1fr ) );
+	}
+
 	.indexlane-rila-metrics > div:last-child {
 		grid-column: 1 / -1;
 	}
@@ -336,13 +586,20 @@
 
 @media screen and ( max-width: 782px ) {
 	.indexlane-rila-form,
-	.indexlane-rila-session {
+	.indexlane-rila-session,
+	.indexlane-rila-baseline {
 		padding-right: 16px;
 		padding-left: 16px;
 	}
 
-	.indexlane-rila-session-heading {
+	.indexlane-rila-session-heading,
+	.indexlane-rila-baseline-heading {
 		display: block;
+	}
+
+	.indexlane-rila-baseline-state {
+		display: inline-block;
+		margin-top: 12px;
 	}
 
 	.indexlane-rila-target-detail-heading {
@@ -359,6 +616,11 @@
 	}
 
 	.indexlane-rila-metrics {
+		grid-template-columns: 1fr;
+	}
+
+	.indexlane-rila-baseline-metadata,
+	.indexlane-rila-comparison-summary {
 		grid-template-columns: 1fr;
 	}
 

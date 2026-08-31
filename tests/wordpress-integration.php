@@ -1,6 +1,6 @@
 <?php
 /**
- * WordPress-loaded integration coverage for resumable scans and 0.4 reports.
+ * WordPress-loaded integration coverage for resumable scans, reports, and baselines.
  *
  * Run after WordPress is installed and the plugin is active:
  * wp eval-file wp-content/plugins/indexlane-redirect-internal-link-auditor/tests/wordpress-integration.php
@@ -78,6 +78,16 @@ $translated_csv = indexlane_wp_invoke( 'build_csv_rows', array( array(), 'impact
 indexlane_wp_assert_same( 'Ziel', $translated_csv[0][0], 'CSV headers must be translated through the exact plugin text domain.' );
 $translated_coverage_csv = indexlane_wp_invoke( 'build_csv_rows', array( array(), 'coverage', array() ) );
 indexlane_wp_assert_same( 'Zieltitel', $translated_coverage_csv[0][0], 'Coverage CSV headers must use the exact plugin text domain.' );
+$translated_comparison_csv = indexlane_wp_invoke(
+	'build_comparison_csv_rows',
+	array(
+		array(
+			'summary' => array(),
+			'rows'    => array(),
+		)
+	)
+);
+indexlane_wp_assert_same( 'Ziel', $translated_comparison_csv[0][2], 'Comparison CSV headers must use the exact plugin text domain.' );
 remove_filter( 'gettext_indexlane-redirect-internal-link-auditor', $translation_filter, 10 );
 
 $post_type = 'indexlane_fixture';
@@ -138,6 +148,8 @@ $http_filter = static function ( $preempt, array $args, string $url ) use ( &$ht
 add_filter( 'pre_http_request', $http_filter, 10, 3 );
 
 try {
+	delete_user_option( $administrator->ID, 'indexlane_rila_baseline', false );
+
 	foreach ( $contents as $index => $content ) {
 		$post_id = wp_insert_post(
 			array(
@@ -207,6 +219,7 @@ try {
 	$session = indexlane_wp_invoke( 'get_scan_session' );
 	indexlane_wp_assert_same( 'limit_reached', $session['status'], 'A request-limited session must resume after a page/request boundary.' );
 	$session['request_limit'] += 250;
+	$session['request_allowance_extensions']++;
 	$session['status']         = 'running';
 
 	$batch_count   = 0;
@@ -269,15 +282,84 @@ try {
 	indexlane_wp_assert_same( 3, count( $impact_rows ), 'Impact CSV must contain the broken and redirect destinations plus its header.' );
 	indexlane_wp_assert_same( 8, count( $coverage_csv_rows ), 'Coverage CSV must contain every scanned content item plus its header.' );
 
+	// Restore the production request-allowance invariant after the deliberately
+	// tiny allowance used above to exercise an interrupted redirect chain.
+	$session['request_limit']                = 250;
+	$session['request_allowance_extensions'] = 0;
+	$baseline = indexlane_wp_invoke( 'build_baseline_from_session', array( $session ) );
+	if ( is_wp_error( $baseline ) ) {
+		throw new RuntimeException( $baseline->get_error_message() );
+	}
+	indexlane_wp_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'A completed WordPress scan must produce portable baseline evidence.' );
+	indexlane_wp_assert_same( 1, $baseline['schema_version'], 'The baseline must use the supported evidence schema.' );
+	indexlane_wp_assert_same( '0.5.0', $baseline['plugin_version'], 'The baseline must identify the plugin version that created it.' );
+	indexlane_wp_assert_same( $home, $baseline['site_url'], 'The baseline must be bound to this exact WordPress site URL.' );
+	indexlane_wp_assert_same( 7, $baseline['scope']['total_items'], 'The baseline must preserve the complete selected corpus.' );
+	indexlane_wp_assert_same( true, $baseline['completion']['complete'], 'The baseline must explicitly record complete evidence.' );
+	indexlane_wp_assert_same( true, indexlane_wp_invoke( 'save_baseline', array( $baseline ) ), 'WordPress must persist one opt-in baseline for the current administrator.' );
+	indexlane_wp_assert_same( $baseline, indexlane_wp_invoke( 'get_saved_baseline' ), 'The saved baseline must round-trip through user-option validation.' );
+
+	$baseline_json = wp_json_encode( $baseline, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
+	if ( ! is_string( $baseline_json ) ) {
+		throw new RuntimeException( 'WordPress could not encode baseline JSON.' );
+	}
+	indexlane_wp_assert_same( $baseline, indexlane_wp_invoke( 'parse_baseline_json', array( $baseline_json ) ), 'Exported JSON must pass strict import validation without changing evidence.' );
+	$wrong_site             = $baseline;
+	$wrong_site['site_url'] = 'https://different.example';
+	$wrong_site_result      = indexlane_wp_invoke( 'validate_baseline', array( $wrong_site, true ) );
+	indexlane_wp_assert_same( true, is_wp_error( $wrong_site_result ), 'A baseline owned by another site must be rejected.' );
+	indexlane_wp_assert_same( 'baseline_wrong_site', $wrong_site_result->get_error_code(), 'Site rejection must use a stable validation code.' );
+
+	$verification_settings = indexlane_wp_invoke( 'verification_settings_from_baseline', array( $baseline ) );
+	if ( is_wp_error( $verification_settings ) ) {
+		throw new RuntimeException( $verification_settings->get_error_message() );
+	}
+	indexlane_wp_assert_same( $baseline['settings']['post_types'], $verification_settings['post_types'], 'Verification must reproduce the saved public post types.' );
+	indexlane_wp_assert_same( $baseline['settings']['content_scope'], $verification_settings['content_scope'], 'Verification must reproduce the saved content scope.' );
+	$baseline_fingerprint = indexlane_wp_invoke( 'baseline_fingerprint', array( $baseline ) );
+	$verification_session = indexlane_wp_invoke(
+		'create_scan_session',
+		array( $verification_settings, 'verification', $baseline['baseline_id'], $baseline_fingerprint )
+	);
+	indexlane_wp_assert_same( 'verification', $verification_session['scan_mode'], 'A verification session must be marked independently from a standard scan.' );
+	indexlane_wp_assert_same( $baseline['baseline_id'], $verification_session['baseline_id'], 'A verification session must bind to the selected baseline identity.' );
+	indexlane_wp_assert_same( 7, $verification_session['total_items'], 'Verification must snapshot the same all-content scope.' );
+
+	$verification_batch_count = 0;
+	while ( 'complete' !== $verification_session['status'] && $verification_batch_count < 30 ) {
+		$verification_session = indexlane_wp_invoke( 'process_scan_batch', array( $verification_session ) );
+		$verification_batch_count++;
+	}
+	indexlane_wp_assert_same( 'complete', $verification_session['status'], 'The exact-scope verification scan must complete.' );
+	$comparison = indexlane_wp_invoke( 'get_session_comparison', array( $verification_session ) );
+	if ( is_wp_error( $comparison ) ) {
+		throw new RuntimeException( $comparison->get_error_message() );
+	}
+	indexlane_wp_assert_same(
+		array(
+			'new'      => 0,
+			'changed'  => 0,
+			'resolved' => 0,
+			'still'    => 3,
+		),
+		$comparison['summary'],
+		'Unchanged fixtures must classify every saved issue destination as still present.'
+	);
+	$comparison_csv_rows = indexlane_wp_invoke( 'build_comparison_csv_rows', array( $comparison ) );
+	indexlane_wp_assert_same( 4, count( $comparison_csv_rows ), 'Comparison CSV must contain its header and all three issue destinations.' );
+
 	$original_user_id = get_current_user_id();
 	wp_set_current_user( 0 );
 	indexlane_wp_assert_same( null, indexlane_wp_invoke( 'get_scan_session' ), 'Another user must not see the administrator session.' );
+	indexlane_wp_assert_same( null, indexlane_wp_invoke( 'get_saved_baseline' ), 'Another user must not see the administrator baseline.' );
 	wp_set_current_user( $original_user_id );
 	indexlane_wp_assert_same( 7, count( indexlane_wp_invoke( 'get_scan_session' )['results'] ), 'The owning administrator must retain the completed evidence.' );
+	indexlane_wp_assert_same( $baseline['baseline_id'], indexlane_wp_invoke( 'get_saved_baseline' )['baseline_id'], 'The owning administrator must retain the saved baseline.' );
 } finally {
 	remove_filter( 'pre_http_request', $http_filter, 10 );
 	wp_set_current_user( $administrator->ID );
 	indexlane_wp_invoke( 'delete_scan_session' );
+	delete_user_option( $administrator->ID, 'indexlane_rila_baseline', false );
 	foreach ( $fixture_ids as $fixture_id ) {
 		wp_delete_post( $fixture_id, true );
 	}

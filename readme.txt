@@ -4,7 +4,7 @@ Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.4.0
+Stable tag: 0.5.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -12,13 +12,13 @@ Audit redirects, broken links, and content link coverage inside WordPress.
 
 == Description ==
 
-IndexLane Redirect & Internal Link Auditor finds internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains. It also shows how scanned content links to each published item.
+IndexLane Redirect & Internal Link Auditor finds internal content links that return 404/410, redirect through 301/302, or still point to old, staging, or development domains. It also shows how scanned content links to each published item and can verify fixes against an explicitly saved evidence baseline.
 
 It runs from inside WordPress admin, stays read-only, and produces evidence a site owner or developer can review or export. It does not auto-fix content or mutate the database.
 
 Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor).
 
-Version 0.4 can:
+Version 0.5 can:
 
 * Scan all published content or a numeric limit of the newest content.
 * Scan any registered public post type, not only posts, pages, and products.
@@ -36,6 +36,13 @@ Version 0.4 can:
 * Resolve redirects to their final published WordPress content item while retaining redirect evidence.
 * Filter content with zero or one detected linking source and open every target's source-and-anchor details.
 * Export separate target-coverage, destination-impact, and detailed-row CSV reports.
+* Save one explicitly selected completed scan as a per-administrator baseline.
+* Export and import strict, versioned, site-specific baseline JSON.
+* Rerun the baseline's exact scope as a verification scan.
+* Classify issue destinations as new, changed, resolved, or still present.
+* Compare baseline and verification status chains, redirects, final URLs, severity, occurrences, and affected content counts.
+* Export the exact completed verification comparison as CSV.
+* Delete the saved baseline explicitly without changing temporary scan evidence.
 * Show live content, link, unique-destination, HTTP-request, and actionable-issue progress.
 * Pause, continue, cancel, and resume a saved scan after reloading the page.
 * Provide translation-ready administrator, progress, evidence, JavaScript, and CSV strings through the WordPress.org text domain.
@@ -50,13 +57,15 @@ HTTP requests are made only to the current site. Links to old, staging, or devel
 
 == Data handling ==
 
-Scans run on demand from WordPress admin through authenticated AJAX batches. The active or completed session is stored in a per-user WordPress transient for up to 24 hours after its last activity. Abandoned sessions expire automatically, and completed-session CSV exports reuse the exact displayed evidence without scanning again.
+Scans run on demand from WordPress admin through authenticated AJAX batches. The active or completed session is stored in a per-user WordPress transient for up to 24 hours after its last activity. Abandoned sessions expire automatically, and completed-session exports reuse the exact displayed evidence without scanning again.
+
+An administrator may explicitly save one site-specific baseline in their WordPress user options. It remains until it is replaced or deleted. Portable baseline JSON is limited to 20 MiB and validated against the exact supported schema and current site URL before import.
 
 The plugin does not create an account, call an IndexLane service, or add frontend tracking.
 
 == Limits ==
 
-Version 0.4 scans links found in the `post_content` field of selected public post types. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
+Version 0.5 scans links found in the `post_content` field of selected public post types. It does not crawl menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
 
 Each AJAX batch makes at most five outbound HTTP requests. A session begins with an explicit allowance of 250 actual requests, including redirect hops. When that allowance is reached, the administrator can grant another 250 requests and continue without losing progress or recording incomplete evidence.
 
@@ -68,16 +77,17 @@ Each AJAX batch makes at most five outbound HTTP requests. A session begins with
 4. Select the public content types and choose all published content or a numeric limit.
 5. Start the scan, keep the page open while it runs, or pause and return later.
 6. Review content-link coverage and export target-coverage, destination-impact, or detailed-row CSV reports after the session completes.
+7. Optionally save the completed scan as a baseline, then run its exact scope again to verify fixes and export the comparison.
 
 == Frequently Asked Questions ==
 
 = Does this plugin change links or content? =
 
-No. Version 0.4 is read-only and diagnostic only.
+No. Version 0.5 is read-only and diagnostic only.
 
 = Does this plugin store scan results? =
 
-Only temporarily. One active or completed session per administrator is stored in a WordPress transient for up to 24 hours after its last activity. The plugin does not create custom database tables.
+One active or completed session per administrator is stored temporarily in a WordPress transient for up to 24 hours after its last activity. One opt-in baseline per administrator is stored in WordPress user options until explicitly replaced or deleted. The plugin does not create custom database tables or retain scan history.
 
 = Does it use an external API? =
 
@@ -89,11 +99,18 @@ No. Old, staging, and development-domain links are flagged but not fetched. A sa
 
 == Screenshots ==
 
-1. Scan setup with all-published-content scope and public post-type selection.
-2. A resumable scan session showing progress, request allowance, and lifecycle controls.
-3. Completed content-link coverage with source status, direct/redirected evidence, target details, and exact-session CSV exports.
+1. Baseline-aware scan setup with public post-type selection and portable JSON import access.
+2. Saved baseline metadata with JSON export and a paused exact-scope verification scan.
+3. Completed verification comparison with remediation categories and baseline-versus-current evidence.
 
 == Changelog ==
+
+= 0.5.0 =
+
+* Added one opt-in, site-specific baseline per administrator with strict JSON export, import, replacement, and deletion controls.
+* Added exact-scope verification scans bound to the saved baseline revision.
+* Added new, changed, resolved, and still-present issue classifications with before-and-after evidence and a comparison CSV export.
+* Split the plugin implementation into focused modules and updated packaging, screenshots, documentation, translation auditing, and test coverage.
 
 = 0.4.0 =
 

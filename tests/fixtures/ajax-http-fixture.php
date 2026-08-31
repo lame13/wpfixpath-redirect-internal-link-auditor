@@ -24,6 +24,39 @@ add_action(
 add_filter( 'update_footer', '__return_empty_string', 99 );
 
 add_action(
+	'admin_bar_menu',
+	static function ( WP_Admin_Bar $admin_bar ): void {
+		$admin_bar->remove_node( 'updates' );
+		$admin_bar->remove_node( 'sqlite-db-integration' );
+	},
+	PHP_INT_MAX
+);
+
+add_action(
+	'admin_head',
+	static function (): void {
+		$focus = isset( $_GET['indexlane_rila_e2e_focus'] )
+			? sanitize_key( wp_unslash( $_GET['indexlane_rila_e2e_focus'] ) )
+			: '';
+		?>
+		<style id="indexlane-rila-e2e-admin-cleanup">#adminmenu .menu-counter,#adminmenu .update-plugins{display:none}</style>
+		<?php if ( 'comparison' === $focus ) : ?>
+			<style id="indexlane-rila-e2e-comparison-focus">
+				#indexlane-rila-baseline,
+				#indexlane-rila-session,
+				#indexlane-rila-results > h2:first-child,
+				#indexlane-rila-results > p:first-of-type,
+				#indexlane-rila-results > .indexlane-rila-export-actions,
+				#indexlane-rila-results > .indexlane-rila-save-baseline,
+				#indexlane-rila-results > .indexlane-rila-baseline-current,
+				#indexlane-rila-comparison ~ * { display: none !important; }
+			</style>
+		<?php endif; ?>
+		<?php
+	}
+);
+
+add_action(
 	'init',
 	static function (): void {
 		register_post_type(
@@ -51,11 +84,17 @@ add_action(
 		}
 
 		wp_set_current_user( $administrator->ID );
-		wp_set_auth_cookie( $administrator->ID, false, is_ssl() );
+		wp_set_auth_cookie( $administrator->ID, true, is_ssl() );
 
-		$target   = isset( $_GET['indexlane_rila_e2e_target'] ) ? sanitize_key( wp_unslash( $_GET['indexlane_rila_e2e_target'] ) ) : '';
-		$fragment = in_array( $target, array( 'session', 'results' ), true ) ? '#indexlane-rila-' . $target : '';
-		wp_safe_redirect( admin_url( 'tools.php?page=indexlane-redirect-internal-link-auditor' ) . $fragment );
+		$target     = isset( $_GET['indexlane_rila_e2e_target'] ) ? sanitize_key( wp_unslash( $_GET['indexlane_rila_e2e_target'] ) ) : '';
+		$admin_page = admin_url( 'tools.php?page=indexlane-redirect-internal-link-auditor' );
+		if ( 'comparison' === $target ) {
+			$admin_page = add_query_arg( 'indexlane_rila_e2e_focus', 'comparison', $admin_page );
+			$fragment   = '';
+		} else {
+			$fragment = in_array( $target, array( 'baseline', 'session', 'results' ), true ) ? '#indexlane-rila-' . $target : '';
+		}
+		wp_safe_redirect( $admin_page . $fragment );
 		exit;
 	},
 	20

@@ -234,4 +234,140 @@ grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-inter
 [[ "$(wc -l < "${coverage_csv}" | tr -d ' ')" == "41" ]]
 grep -Fq -- '"Target Title","Target URL","Incoming Link Occurrences"' "${coverage_csv}"
 
+saved_baseline_page="${temporary_root}/baseline-saved.html"
+curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
+	--data-urlencode "indexlane_rila_nonce=${nonce}" \
+	--data-urlencode "session_id=${session_id}" \
+	--data "indexlane_rila_action=save_baseline" \
+	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${saved_baseline_page}"
+grep -Fq -- 'Baseline ready' "${saved_baseline_page}"
+grep -Fq -- 'This completed scan is the saved baseline.' "${saved_baseline_page}"
+
+baseline_json="${temporary_root}/baseline.json"
+baseline_headers="${temporary_root}/baseline.headers"
+curl -fsS -b "${cookie_jar}" -D "${baseline_headers}" \
+	--data-urlencode "indexlane_rila_nonce=${nonce}" \
+	--data "indexlane_rila_action=export_baseline_json" \
+	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${baseline_json}"
+grep -Fqi -- 'content-type: application/json' "${baseline_headers}"
+grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-baseline-' "${baseline_headers}"
+php -r '
+	$data = json_decode(file_get_contents($argv[1]), true);
+	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 1 || $data["plugin_version"] !== "0.5.0") {
+		fwrite(STDERR, "Exported baseline metadata is invalid.\n");
+		exit(1);
+	}
+	if ($data["site_url"] !== $argv[2] || $data["scope"]["content_scope"] !== "all" || $data["scope"]["total_items"] !== 40) {
+		fwrite(STDERR, "Exported baseline scope or site ownership is invalid.\n");
+		exit(1);
+	}
+	if ($data["completion"]["complete"] !== true || $data["completion"]["request_limit"] !== 500 || $data["completion"]["request_allowance_extensions"] !== 1) {
+		fwrite(STDERR, "Exported baseline completion evidence is invalid.\n");
+		exit(1);
+	}
+' "${baseline_json}" "${base_url}"
+
+verification_start="${temporary_root}/verification-start.json"
+curl -fsS -b "${cookie_jar}" \
+	--data "action=indexlane_rila_start_scan" \
+	--data-urlencode "nonce=${nonce}" \
+	--data "verification=1" \
+	"${base_url}/wp-admin/admin-ajax.php" -o "${verification_start}"
+assert_success "${verification_start}"
+[[ "$(json_value "${verification_start}" data.session.scan_mode)" == "verification" ]]
+verification_session_id="$(json_value "${verification_start}" data.session.id)"
+
+verification_status="running"
+verification_previous_requests=0
+verification_saw_limit=false
+for batch_number in $(seq 1 100); do
+	verification_batch_response="${temporary_root}/verification-batch-${batch_number}.json"
+	curl -fsS -b "${cookie_jar}" \
+		--data "action=indexlane_rila_run_batch" \
+		--data-urlencode "nonce=${nonce}" \
+		--data-urlencode "session_id=${verification_session_id}" \
+		"${base_url}/wp-admin/admin-ajax.php" -o "${verification_batch_response}"
+	assert_success "${verification_batch_response}"
+	verification_status="$(json_value "${verification_batch_response}" data.session.status)"
+	verification_requests="$(json_value "${verification_batch_response}" data.session.stats.http_requests)"
+	if (( verification_requests - verification_previous_requests > 5 )); then
+		printf 'Verification AJAX batch %d exceeded the five-request hard limit.\n' "${batch_number}" >&2
+		exit 1
+	fi
+	verification_previous_requests="${verification_requests}"
+
+	if [[ "${verification_status}" == "limit_reached" ]]; then
+		verification_saw_limit=true
+		verification_extend_response="${temporary_root}/verification-extend.json"
+		curl -fsS -b "${cookie_jar}" \
+			--data "action=indexlane_rila_control_scan" \
+			--data-urlencode "nonce=${nonce}" \
+			--data-urlencode "session_id=${verification_session_id}" \
+			--data "command=extend" \
+			"${base_url}/wp-admin/admin-ajax.php" -o "${verification_extend_response}"
+		assert_success "${verification_extend_response}"
+		verification_status="running"
+	fi
+
+	if [[ "${verification_status}" == "complete" ]]; then
+		break
+	fi
+done
+
+if [[ "${verification_status}" != "complete" || "${verification_saw_limit}" != "true" ]]; then
+	printf 'The exact-scope verification scan did not complete through its allowance continuation.\n' >&2
+	exit 1
+fi
+
+verification_page="${temporary_root}/verification.html"
+curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${verification_page}"
+grep -Fq -- 'Verification comparison' "${verification_page}"
+grep -Fq -- 'New issues' "${verification_page}"
+grep -Fq -- 'Worsened or changed' "${verification_page}"
+grep -Fq -- 'Resolved' "${verification_page}"
+grep -Fq -- 'Still present' "${verification_page}"
+grep -Fq -- '>122</strong><span>Still present<' "${verification_page}"
+
+comparison_csv="${temporary_root}/comparison.csv"
+comparison_headers="${temporary_root}/comparison.headers"
+curl -fsS -b "${cookie_jar}" -D "${comparison_headers}" \
+	--data-urlencode "indexlane_rila_nonce=${nonce}" \
+	--data-urlencode "session_id=${verification_session_id}" \
+	--data "indexlane_rila_action=export_comparison" \
+	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${comparison_csv}"
+grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-comparison-' "${comparison_headers}"
+[[ "$(wc -l < "${comparison_csv}" | tr -d ' ')" == "123" ]]
+php -r '
+	$handle = fopen($argv[1], "r");
+	$header = false === $handle ? false : fgetcsv($handle, 0, ",", "\"", "");
+	$expected = array("Category", "Change", "Destination", "Changed Evidence", "Baseline HTTP Status Chain", "Verification HTTP Status Chain");
+	if (!is_array($header) || array_slice($header, 0, count($expected)) !== $expected) {
+		fwrite(STDERR, "Comparison CSV headers are invalid.\n");
+		exit(1);
+	}
+' "${comparison_csv}"
+
+deleted_baseline_page="${temporary_root}/baseline-deleted.html"
+curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
+	--data-urlencode "indexlane_rila_nonce=${nonce}" \
+	--data "confirm_delete=1" \
+	--data "indexlane_rila_action=delete_baseline" \
+	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${deleted_baseline_page}"
+grep -Fq -- 'No baseline saved' "${deleted_baseline_page}"
+
+imported_baseline_page="${temporary_root}/baseline-imported.html"
+curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
+	--form-string "indexlane_rila_nonce=${nonce}" \
+	--form "baseline_file=@${baseline_json};type=application/json" \
+	--form-string "indexlane_rila_action=import_baseline" \
+	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${imported_baseline_page}"
+grep -Fq -- 'Baseline ready' "${imported_baseline_page}"
+grep -Fq -- 'validated JSON evidence was imported' "${imported_baseline_page}"
+
+curl -fsS -L -b "${cookie_jar}" -c "${cookie_jar}" \
+	--data-urlencode "indexlane_rila_nonce=${nonce}" \
+	--data "confirm_delete=1" \
+	--data "indexlane_rila_action=delete_baseline" \
+	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o /dev/null
+
 printf 'Authenticated WordPress AJAX end-to-end tests passed.\n'

@@ -7,9 +7,11 @@
 
 	const config = window.IndexLaneRila;
 	const form = document.getElementById( 'indexlane-rila-scan-form' );
+	const verificationForm = document.getElementById( 'indexlane-rila-verification-form' );
 	const panel = document.getElementById( 'indexlane-rila-session' );
 	const results = document.getElementById( 'indexlane-rila-results' );
 	const startButton = document.getElementById( 'indexlane-rila-start' );
+	const verificationButton = document.getElementById( 'indexlane-rila-start-verification' );
 	const pauseButton = document.getElementById( 'indexlane-rila-pause' );
 	const resumeButton = document.getElementById( 'indexlane-rila-resume' );
 	const extendButton = document.getElementById( 'indexlane-rila-extend' );
@@ -56,6 +58,9 @@
 			Array.from( form.elements ).forEach( function ( control ) {
 				control.disabled = active || requestInFlight;
 			} );
+		}
+		if ( verificationButton ) {
+			verificationButton.disabled = active || requestInFlight;
 		}
 
 		if ( ! hasSession ) {
@@ -187,28 +192,36 @@
 		performControl( command );
 	}
 
-	if ( form ) {
-		form.addEventListener( 'submit', async function ( event ) {
-			event.preventDefault();
-			if ( requestInFlight || ( session && [ 'running', 'paused', 'limit_reached' ].includes( session.status ) ) ) {
-				return;
-			}
+	async function startScan( scanForm, isVerification ) {
+		if ( requestInFlight || ( session && [ 'running', 'paused', 'limit_reached' ].includes( session.status ) ) ) {
+			return;
+		}
 
-			const scanData = new FormData( form );
-			requestInFlight = true;
+		if ( isVerification && session && session.status === 'complete' && ! window.confirm( config.strings.confirmVerification ) ) {
+			return;
+		}
+
+		const scanData = new FormData( scanForm );
+		requestInFlight = true;
+		clientMessage = '';
+		render();
+		try {
+			const data = await request( 'indexlane_rila_start_scan', scanData );
+			session = data.session;
+			haltedByError = false;
 			clientMessage = '';
-			render();
-			try {
-				const data = await request( 'indexlane_rila_start_scan', scanData );
-				session = data.session;
-				haltedByError = false;
-				clientMessage = '';
-			} catch ( error ) {
-				clientMessage = error instanceof Error ? error.message : config.strings.networkError;
-			}
-			requestInFlight = false;
-			render();
-			scheduleBatch();
+		} catch ( error ) {
+			clientMessage = error instanceof Error ? error.message : config.strings.networkError;
+		}
+		requestInFlight = false;
+		render();
+		scheduleBatch();
+	}
+
+	if ( form ) {
+		form.addEventListener( 'submit', function ( event ) {
+			event.preventDefault();
+			startScan( form, false );
 		} );
 
 		const limitInput = document.getElementById( 'indexlane-rila-max-posts' );
@@ -220,6 +233,13 @@
 				}
 			} );
 		}
+	}
+
+	if ( verificationForm ) {
+		verificationForm.addEventListener( 'submit', function ( event ) {
+			event.preventDefault();
+			startScan( verificationForm, true );
+		} );
 	}
 
 	pauseButton.addEventListener( 'click', function () {

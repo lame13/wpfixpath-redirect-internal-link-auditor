@@ -23,9 +23,10 @@ cleanup() {
 }
 trap cleanup EXIT
 
-mkdir -p "${package_root}/assets" "${output_dir}"
+mkdir -p "${package_root}/assets" "${package_root}/includes" "${output_dir}"
 cp "${plugin_file}" "${repository_root}/readme.txt" "${package_root}/"
 cp "${repository_root}/assets/admin.css" "${repository_root}/assets/admin.js" "${package_root}/assets/"
+cp "${repository_root}"/includes/*.php "${package_root}/includes/"
 
 (
 	cd "${temporary_root}"

@@ -26,6 +26,7 @@ if ( ! $administrator instanceof WP_User ) {
 
 wp_set_password( 'password', $administrator->ID );
 delete_transient( 'indexlane_rila_session_' . $administrator->ID );
+delete_user_option( $administrator->ID, 'indexlane_rila_baseline', false );
 
 $existing = get_posts(
 	array(

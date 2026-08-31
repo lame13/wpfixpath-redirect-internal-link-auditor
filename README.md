@@ -2,7 +2,7 @@
 
 Audit redirects, broken links, and content link coverage in the stored content of any public WordPress post type.
 
-Version 0.4 runs complete, resumable scan sessions from wp-admin. It adds destination-oriented content link coverage to the existing destination-impact and exact-occurrence evidence without editing content, following external redirect targets, or calling an IndexLane service.
+Version 0.5 adds opt-in baselines and exact-scope fix verification to the complete, resumable scan and content-link coverage workflow. It remains read-only, never follows external redirect targets, and does not call an IndexLane service.
 
 Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://indexlane.dev/plugins/redirect-internal-link-auditor)
 
@@ -18,6 +18,19 @@ Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://ind
 - Export target-coverage, destination-impact, and detailed-row CSVs only from exact completed-session evidence.
 
 Each AJAX batch processes at most five content items and makes at most five actual outbound HTTP requests. Redirect chains persist between batches, so an allowance boundary never turns partial redirect evidence into a result row.
+
+## Baselines and fix verification
+
+- Save one explicitly selected completed scan as a site-specific baseline for the current administrator.
+- Export or import portable, versioned JSON evidence with strict schema, file-size, completeness, counter, and site-URL validation.
+- Rerun the saved post types, content scope, old domains, timeout, and redirect limit exactly.
+- Bind each verification session to the baseline ID and fingerprint used when it started.
+- Classify destination issues as new, worsened or changed, resolved, or still present.
+- Show baseline and verification status chains, redirect counts, final URLs, result severity, occurrence counts, and affected-content counts.
+- Export the completed comparison as CSV without making additional HTTP requests.
+- Delete the saved baseline explicitly without deleting the current temporary scan session.
+
+Baseline comparison is derived entirely from retained evidence. It never rescans during page rendering or export, and it refuses to compare when the saved baseline changed after verification started.
 
 ## What it checks
 
@@ -60,6 +73,8 @@ Destination grouping normalizes scheme and host case, fragments, and default por
 
 One active or completed scan session per administrator is stored in a WordPress transient. Its sliding expiry is 24 hours, so abandoned sessions are cleaned up automatically by WordPress and completed evidence remains available briefly for export.
 
+One opt-in, site-specific baseline per administrator is stored in WordPress user options until explicitly replaced or deleted. Portable JSON supports longer-term evidence outside WordPress without creating an in-plugin scan-history system.
+
 The plugin creates no custom table, cron job, account, telemetry, frontend tracking, or content mutation.
 
 All plugin-owned administrator, status, warning, result, JavaScript, and CSV-header strings use the `indexlane-redirect-internal-link-auditor` text domain. WordPress.org language packs can translate the plugin without bundled `.po` or `.mo` files.
@@ -69,6 +84,8 @@ All plugin-owned administrator, status, warning, result, JavaScript, and CSV-hea
 This is a stored-content link checker, not a rendered-site crawler. It does not inspect menus, widgets, theme templates, page-builder metadata, shortcode output, or rendered frontend pages.
 
 HTTP checks use bounded GET response bodies, administrator-selected timeouts and redirect limits, WordPress unsafe-URL rejection, and manual same-site redirect handling.
+
+Baseline imports are limited to 20 MiB, 100,000 content items, and 100,000 occurrence rows. Imported data must use the exact supported schema and belong to the current normalized site URL.
 
 ## CSV exports
 
@@ -111,6 +128,8 @@ Detailed-row columns:
 - Anchor Text
 - Result
 
+Verification-comparison columns include the category, direction, destination, changed fields, and explicit baseline/verification values for every required evidence field.
+
 All exports protect spreadsheet cells that could otherwise be interpreted as formulas.
 
 ## Result labels
@@ -129,11 +148,15 @@ Run the fast syntax and behavioral checks:
 
 ```bash
 php -l indexlane-redirect-internal-link-auditor.php
+php -l includes/trait-admin.php
+php -l includes/trait-scan.php
+php -l includes/trait-reports.php
+php -l includes/trait-baselines.php
 php tests/behavioral.php
 WP_CLI_BIN=/path/to/wp ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-link-auditor.pot
 ```
 
-The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded integration suite, and exercises the authenticated AJAX lifecycle, coverage filter and detail views, and all three CSV downloads over HTTP.
+The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded integration suite, and exercises the authenticated AJAX lifecycle, baseline save/import/export/delete flow, exact-scope verification, comparison export, coverage filters, and detail views over HTTP.
 
 Build the production ZIP for WordPress.org submission:
 

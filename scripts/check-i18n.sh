@@ -28,7 +28,7 @@ php "${repository_root}/tests/i18n-audit.php"
 	"${pot_path}" \
 	--slug="${plugin_slug}" \
 	--domain="${plugin_slug}" \
-	--include="${plugin_slug}.php,assets/admin.js" \
+	--include="${plugin_slug}.php,includes/*.php,assets/admin.js" \
 	--exclude="dist,tests,FUTURE-PLAN.md"
 
 grep -Fq '"X-Domain: indexlane-redirect-internal-link-auditor\n"' "${pot_path}"
@@ -38,6 +38,8 @@ grep -Fq 'msgid "Pausing after the current batch…"' "${pot_path}"
 grep -Fq 'msgid "Content link coverage"' "${pot_path}"
 grep -Fq 'msgid "No incoming links detected in scanned content."' "${pot_path}"
 grep -Fq 'msgid "Target Title"' "${pot_path}"
+grep -Fq 'msgid "Baseline and fix verification"' "${pot_path}"
+grep -Fq 'msgid "Export comparison as CSV"' "${pot_path}"
 
 if grep -Eq '^#: (dist|tests)/' "${pot_path}"; then
 	printf 'POT extraction unexpectedly included non-release files.\n' >&2

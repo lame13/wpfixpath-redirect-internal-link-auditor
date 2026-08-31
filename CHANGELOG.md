@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.0 - 2026-08-31
+
+- Added one opt-in, site-specific baseline per administrator with strict JSON export, import, replacement, and deletion controls.
+- Added exact-scope verification scans bound to the saved baseline revision so fixes can be compared without silently changing scope.
+- Added new, changed, resolved, and still-present issue classifications with explicit before-and-after evidence and a comparison CSV export.
+- Split the plugin implementation into focused admin, scan, report, and baseline modules while preserving the existing runtime class and public behavior.
+- Updated packaging, documentation, screenshots, translation auditing, behavioral tests, WordPress integration tests, and authenticated AJAX coverage for the complete baseline lifecycle.
+
 ## 0.4.0 - 2026-08-29
 
 - Added destination-oriented content link coverage for every published content item in a completed scan.
