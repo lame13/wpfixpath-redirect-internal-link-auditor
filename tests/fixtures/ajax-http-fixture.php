@@ -46,10 +46,25 @@ add_action(
 				#indexlane-rila-session,
 				#indexlane-rila-results > h2:first-child,
 				#indexlane-rila-results > p:first-of-type,
+				#indexlane-rila-results > .indexlane-rila-results-technical,
 				#indexlane-rila-results > .indexlane-rila-export-actions,
 				#indexlane-rila-results > .indexlane-rila-save-baseline,
 				#indexlane-rila-results > .indexlane-rila-baseline-current,
 				#indexlane-rila-comparison ~ * { display: none !important; }
+			</style>
+		<?php elseif ( 'coverage' === $focus ) : ?>
+			<style id="indexlane-rila-e2e-coverage-focus">
+				#indexlane-rila-baseline,
+				#indexlane-rila-session,
+				#indexlane-rila-results > h2:first-child,
+				#indexlane-rila-results > p:first-of-type,
+				#indexlane-rila-results > .indexlane-rila-export-actions,
+				#indexlane-rila-results > .indexlane-rila-save-baseline,
+				#indexlane-rila-results > .indexlane-rila-baseline-current,
+				#indexlane-rila-comparison,
+				.indexlane-rila-coverage ~ *,
+				#indexlane-rila-target-detail ~ .indexlane-rila-coverage-filter,
+				#indexlane-rila-target-detail ~ .indexlane-rila-table-scroll { display: none !important; }
 			</style>
 		<?php endif; ?>
 		<?php
@@ -88,9 +103,9 @@ add_action(
 
 		$target     = isset( $_GET['indexlane_rila_e2e_target'] ) ? sanitize_key( wp_unslash( $_GET['indexlane_rila_e2e_target'] ) ) : '';
 		$admin_page = admin_url( 'tools.php?page=indexlane-redirect-internal-link-auditor' );
-		if ( 'comparison' === $target ) {
-			$admin_page = add_query_arg( 'indexlane_rila_e2e_focus', 'comparison', $admin_page );
-			$fragment   = '';
+		if ( in_array( $target, array( 'comparison', 'coverage' ), true ) ) {
+			$admin_page = add_query_arg( 'indexlane_rila_e2e_focus', $target, $admin_page );
+			$fragment   = 'coverage' === $target ? '#indexlane-rila-coverage-heading' : '';
 		} else {
 			$fragment = in_array( $target, array( 'baseline', 'session', 'results' ), true ) ? '#indexlane-rila-' . $target : '';
 		}

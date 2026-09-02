@@ -51,6 +51,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 					'destination_url'       => $destination,
 					'occurrences'            => 0,
 					'source_keys'            => array(),
+					'sources'                => array(),
 					'result'                 => '',
 					'result_rank'            => -1,
 					'has_broken'             => false,
@@ -67,12 +68,27 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 			$groups[ $group_key ]['has_redirect'] = $groups[ $group_key ]['has_redirect'] || $is_redirected;
 			$groups[ $group_key ]['max_redirect_count'] = max( $groups[ $group_key ]['max_redirect_count'], $redirect_count );
 
-			$source_key = self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+			$source_key = isset( $row['source_key'] ) ? trim( (string) $row['source_key'] ) : '';
+			if ( '' === $source_key ) {
+				$source_key = self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+			}
 			if ( '' === $source_key ) {
 				$source_key = isset( $row['source_url'] ) ? (string) $row['source_url'] : '';
 			}
 			if ( '' !== $source_key ) {
 				$groups[ $group_key ]['source_keys'][ $source_key ] = true;
+				if ( ! isset( $groups[ $group_key ]['sources'][ $source_key ] ) ) {
+					$groups[ $group_key ]['sources'][ $source_key ] = array(
+						'key'         => $source_key,
+						'title'       => isset( $row['source_title'] ) ? (string) $row['source_title'] : '',
+						'type'        => isset( $row['source_type'] ) ? (string) $row['source_type'] : '',
+						'context'     => isset( $row['source_context'] ) && 'shared' === $row['source_context'] ? 'shared' : 'contextual',
+						'url'         => isset( $row['source_url'] ) ? (string) $row['source_url'] : '',
+						'edit_url'    => isset( $row['source_edit_url'] ) ? (string) $row['source_edit_url'] : '',
+						'occurrences' => 0,
+					);
+				}
+				$groups[ $group_key ]['sources'][ $source_key ]['occurrences']++;
 			}
 
 			$status_evidence = isset( $row['http_status'] ) ? trim( (string) $row['http_status'] ) : '';
@@ -108,9 +124,21 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 			$http_statuses = array_keys( $group['http_statuses'] );
 			$final_urls    = array_keys( $group['effective_final_urls'] );
 			$warnings      = array_keys( $group['warnings'] );
+			$sources       = array_values( $group['sources'] );
 			sort( $http_statuses, SORT_STRING );
 			sort( $final_urls, SORT_STRING );
 			sort( $warnings, SORT_STRING );
+			usort(
+				$sources,
+				static function ( array $left, array $right ): int {
+					$title_comparison = strnatcasecmp( $left['title'], $right['title'] );
+					if ( 0 !== $title_comparison ) {
+						return $title_comparison;
+					}
+					$edit_comparison = strcmp( $left['edit_url'], $right['edit_url'] );
+					return 0 !== $edit_comparison ? $edit_comparison : strcmp( $left['key'], $right['key'] );
+				}
+			);
 
 			if ( $group['has_broken'] && $group['has_redirect'] ) {
 				$impact = __( 'Broken/error after redirect', 'indexlane-redirect-internal-link-auditor' );
@@ -125,6 +153,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				'impact'                => $impact,
 				'occurrences'           => $group['occurrences'],
 				'affected_sources'      => count( $group['source_keys'] ),
+				'affected_source_details' => $sources,
 				'result'                => '' !== $group['result'] ? $group['result'] : __( 'Needs review', 'indexlane-redirect-internal-link-auditor' ),
 				'result_rank'           => $group['result_rank'],
 				'http_status_evidence'  => implode( ' | ', $http_statuses ),
@@ -189,6 +218,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				'target_edit_url'                => isset( $item['edit_url'] ) ? (string) $item['edit_url'] : '',
 				'incoming_occurrences'           => 0,
 				'linking_source_count'           => 0,
+				'editable_source_count'          => 0,
+				'contextual_incoming'             => 0,
+				'shared_incoming'                 => 0,
+				'contextual_source_count'         => 0,
+				'shared_source_count'             => 0,
 				'outgoing_internal_occurrences'  => 0,
 				'distinct_internal_destinations' => 0,
 				'anchor_text_variants'           => array(),
@@ -199,6 +233,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				'status'                         => '',
 				'incoming_details'               => array(),
 				'_linking_sources'                => array(),
+				'_contextual_sources'             => array(),
+				'_shared_sources'                 => array(),
 				'_outgoing_destinations'          => array(),
 				'_anchor_text_variants'           => array(),
 			);
@@ -232,12 +268,16 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				? max( 0, (int) $row['redirect_count'] )
 				: 0;
 			$is_redirected  = $redirect_count > 0 || ( isset( $row['link_kind_code'] ) && 'redirected' === $row['link_kind_code'] );
-			$source_key     = $source_id > 0
-				? 'id:' . $source_id
-				: self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+			$source_key     = isset( $row['source_key'] ) ? trim( (string) $row['source_key'] ) : '';
+			if ( '' === $source_key ) {
+				$source_key = $source_id > 0
+					? 'id:' . $source_id
+					: self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+			}
 			if ( '' === $source_key ) {
 				$source_key = 'source:' . ( isset( $row['source_title'] ) ? (string) $row['source_title'] : '' );
 			}
+			$source_context = isset( $row['source_context'] ) && 'shared' === $row['source_context'] ? 'shared' : 'contextual';
 
 			$anchor_text = isset( $row['anchor_text'] ) ? trim( (string) $row['anchor_text'] ) : '';
 			if ( '' === $anchor_text ) {
@@ -246,6 +286,13 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 
 			$coverage[ $target_id ]['incoming_occurrences']++;
 			$coverage[ $target_id ]['_linking_sources'][ $source_key ] = true;
+			if ( 'shared' === $source_context ) {
+				$coverage[ $target_id ]['shared_incoming']++;
+				$coverage[ $target_id ]['_shared_sources'][ $source_key ] = true;
+			} else {
+				$coverage[ $target_id ]['contextual_incoming']++;
+				$coverage[ $target_id ]['_contextual_sources'][ $source_key ] = true;
+			}
 			$coverage[ $target_id ]['_anchor_text_variants'][ $anchor_text ] = true;
 			if ( $is_redirected ) {
 				$coverage[ $target_id ]['redirected_incoming']++;
@@ -258,8 +305,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 
 			$coverage[ $target_id ]['incoming_details'][] = array(
 				'source_id'       => $source_id,
+				'source_key'      => $source_key,
 				'source_title'    => isset( $row['source_title'] ) ? (string) $row['source_title'] : '',
 				'source_type'     => isset( $row['source_type'] ) ? (string) $row['source_type'] : '',
+				'source_type_code' => isset( $row['source_type_code'] ) ? (string) $row['source_type_code'] : 'content',
+				'source_context'  => $source_context,
 				'source_url'      => isset( $row['source_url'] ) ? (string) $row['source_url'] : '',
 				'source_edit_url' => isset( $row['source_edit_url'] ) ? (string) $row['source_edit_url'] : '',
 				'anchor_text'     => $anchor_text,
@@ -274,6 +324,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 
 		foreach ( $coverage as &$coverage_row ) {
 			$coverage_row['linking_source_count']           = count( $coverage_row['_linking_sources'] );
+			$coverage_row['editable_source_count']          = $coverage_row['linking_source_count'];
+			$coverage_row['contextual_source_count']        = count( $coverage_row['_contextual_sources'] );
+			$coverage_row['shared_source_count']            = count( $coverage_row['_shared_sources'] );
 			$coverage_row['distinct_internal_destinations'] = count( $coverage_row['_outgoing_destinations'] );
 			$coverage_row['anchor_text_variants']           = array_keys( $coverage_row['_anchor_text_variants'] );
 			natcasesort( $coverage_row['anchor_text_variants'] );
@@ -281,7 +334,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 
 			if ( 0 === $coverage_row['linking_source_count'] ) {
 				$coverage_row['status_code'] = 'none';
-				$coverage_row['status']      = __( 'No incoming links detected in scanned content.', 'indexlane-redirect-internal-link-auditor' );
+				$coverage_row['status']      = __( 'No incoming links detected in selected sources.', 'indexlane-redirect-internal-link-auditor' );
 			} elseif ( 1 === $coverage_row['linking_source_count'] ) {
 				$coverage_row['status_code'] = 'one';
 				$coverage_row['status']      = __( 'One linking source', 'indexlane-redirect-internal-link-auditor' );
@@ -307,7 +360,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				}
 			);
 
-			unset( $coverage_row['_linking_sources'], $coverage_row['_outgoing_destinations'], $coverage_row['_anchor_text_variants'] );
+			unset( $coverage_row['_linking_sources'], $coverage_row['_contextual_sources'], $coverage_row['_shared_sources'], $coverage_row['_outgoing_destinations'], $coverage_row['_anchor_text_variants'] );
 		}
 		unset( $coverage_row );
 
@@ -352,7 +405,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 	 * @param array<string,int>                      $url_to_id Scanned permalink map.
 	 */
 	private static function coverage_source_id_for_result( array $row, array $coverage, array $url_to_id ): int {
-		$source_id = isset( $row['source_id'] ) ? max( 0, (int) $row['source_id'] ) : 0;
+		$source_id = isset( $row['source_content_id'] )
+			? max( 0, (int) $row['source_content_id'] )
+			: ( isset( $row['source_id'] ) ? max( 0, (int) $row['source_id'] ) : 0 );
 		if ( $source_id > 0 && isset( $coverage[ $source_id ] ) ) {
 			return $source_id;
 		}
@@ -543,7 +598,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 					self::csv_safe( __( 'Content', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Content URL', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Content Items Linking Here', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Contextual Links Here', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Navigation/Shared Links Here', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Editable Sources Linking Here', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Links From This Content', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Unique URLs Linked', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Link Text', 'indexlane-redirect-internal-link-auditor' ) ),
@@ -559,7 +616,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 					self::csv_safe( (string) $row['target_title'] ),
 					self::csv_safe( (string) $row['target_url'] ),
 					self::csv_safe( (string) $row['incoming_occurrences'] ),
-					self::csv_safe( (string) $row['linking_source_count'] ),
+					self::csv_safe( (string) $row['contextual_incoming'] ),
+					self::csv_safe( (string) $row['shared_incoming'] ),
+					self::csv_safe( (string) $row['editable_source_count'] ),
 					self::csv_safe( (string) $row['outgoing_internal_occurrences'] ),
 					self::csv_safe( (string) $row['distinct_internal_destinations'] ),
 					self::csv_safe( implode( ' | ', $row['anchor_text_variants'] ) ),
@@ -579,7 +638,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 					self::csv_safe( __( 'URL', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Problem', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
-					self::csv_safe( __( 'Content Items Affected', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Editable Sources Affected', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Affected Source Details', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Source Edit URLs', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'HTTP Status', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Maximum Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
@@ -589,11 +650,30 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 			);
 
 			foreach ( self::build_destination_impact( $results ) as $row ) {
+				$source_details = array();
+				$source_edits   = array();
+				foreach ( $row['affected_source_details'] as $source ) {
+					/* translators: %d: number of link occurrences in one editable source */
+					$source_occurrences = sprintf( _n( '%d link', '%d links', (int) $source['occurrences'], 'indexlane-redirect-internal-link-auditor' ), (int) $source['occurrences'] );
+					$source_details[] = sprintf(
+						/* translators: 1: source title, 2: source type, 3: source scope, 4: localized link-occurrence count */
+						__( '%1$s [%2$s; %3$s; %4$s]', 'indexlane-redirect-internal-link-auditor' ),
+						$source['title'],
+						$source['type'],
+						self::source_context_label( $source['context'] ),
+						$source_occurrences
+					);
+					if ( '' !== $source['edit_url'] ) {
+						$source_edits[ $source['edit_url'] ] = true;
+					}
+				}
 				$rows[] = array(
 					self::csv_safe( (string) $row['destination_url'] ),
 					self::csv_safe( (string) $row['impact'] ),
 					self::csv_safe( (string) $row['occurrences'] ),
 					self::csv_safe( (string) $row['affected_sources'] ),
+					self::csv_safe( implode( ' || ', $source_details ) ),
+					self::csv_safe( implode( ' | ', array_keys( $source_edits ) ) ),
 					self::csv_safe( (string) $row['result'] ),
 					self::csv_safe( (string) $row['http_status_evidence'] ),
 					self::csv_safe( (string) $row['max_redirect_count'] ),
@@ -607,9 +687,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 
 		$rows = array(
 			array(
-				self::csv_safe( __( 'Content Item', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Content Type', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Content URL', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Source', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Source Surface', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Source Scope', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Source URL', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Edit URL', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'HTTP Status', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
@@ -624,7 +706,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 			$rows[] = array(
 				self::csv_safe( (string) $row['source_title'] ),
 				self::csv_safe( (string) $row['source_type'] ),
+				self::csv_safe( self::source_context_label( isset( $row['source_context'] ) ? (string) $row['source_context'] : 'contextual' ) ),
 				self::csv_safe( (string) $row['source_url'] ),
+				self::csv_safe( (string) $row['source_edit_url'] ),
 				self::csv_safe( (string) $row['linked_url'] ),
 				self::csv_safe( (string) $row['http_status'] ),
 				self::csv_safe( (string) $row['redirect_count'] ),

@@ -18,7 +18,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 */
 	private static function build_baseline_from_session( array $session ) {
 		if (
-			! isset( $session['id'], $session['status'], $session['created_at'], $session['settings'], $session['total_items'], $session['content_done'], $session['request_limit'], $session['stats'], $session['content_items'], $session['results'] ) ||
+			! isset( $session['id'], $session['status'], $session['created_at'], $session['settings'], $session['total_items'], $session['sources_done'], $session['request_limit'], $session['stats'], $session['content_items'], $session['results'] ) ||
 			'complete' !== $session['status'] ||
 			! is_array( $session['settings'] ) ||
 			! is_array( $session['stats'] ) ||
@@ -29,6 +29,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		}
 
 		$settings = array(
+			'source_types'  => isset( $session['settings']['source_types'] ) && is_array( $session['settings']['source_types'] ) ? array_values( $session['settings']['source_types'] ) : array(),
 			'post_types'    => isset( $session['settings']['post_types'] ) && is_array( $session['settings']['post_types'] ) ? array_values( $session['settings']['post_types'] ) : array(),
 			'old_domains'   => isset( $session['settings']['old_domains'] ) ? (string) $session['settings']['old_domains'] : '',
 			'content_scope' => isset( $session['settings']['content_scope'] ) ? (string) $session['settings']['content_scope'] : '',
@@ -56,15 +57,17 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			'saved_utc'      => gmdate( 'Y-m-d\TH:i:s\Z' ),
 			'settings'       => $settings,
 			'scope'          => array(
+				'source_types'  => $settings['source_types'],
 				'post_types'    => $settings['post_types'],
 				'content_scope' => $settings['content_scope'],
 				'content_limit' => 'all' === $settings['content_scope'] ? null : $settings['max_posts'],
-				'total_items'   => max( 0, (int) $session['total_items'] ),
+				'total_sources' => max( 0, (int) $session['total_items'] ),
+				'content_items' => max( 0, (int) $stats['content_items_processed'] ),
 			),
 			'completion'     => array(
 				'status'                       => 'complete',
 				'complete'                     => true,
-				'content_done'                 => (bool) $session['content_done'],
+				'sources_done'                 => (bool) $session['sources_done'],
 				'request_limit'                => $request_limit,
 				'http_requests'                => $requests,
 				'request_allowance_remaining'  => max( 0, $request_limit - $requests ),
@@ -89,6 +92,90 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	}
 
 	/**
+	 * Upgrade strict 0.5 saved-scan evidence to the source-aware schema.
+	 *
+	 * Legacy evidence represents only contextual post-content sources. Unknown
+	 * legacy fields are rejected before any values are added.
+	 *
+	 * @param array<string,mixed> $baseline Legacy baseline.
+	 * @return array<string,mixed>|WP_Error
+	 */
+	private static function upgrade_legacy_baseline( array $baseline ) {
+		$top_keys        = array( 'format', 'schema_version', 'baseline_id', 'plugin_version', 'site_url', 'scan_id', 'scan_utc', 'saved_utc', 'settings', 'scope', 'completion', 'stats', 'content_items', 'results' );
+		$settings_keys   = array( 'post_types', 'old_domains', 'content_scope', 'max_posts', 'timeout', 'max_redirects' );
+		$scope_keys      = array( 'post_types', 'content_scope', 'content_limit', 'total_items' );
+		$completion_keys = array( 'status', 'complete', 'content_done', 'request_limit', 'http_requests', 'request_allowance_remaining', 'request_allowance_extensions' );
+		$stats_keys      = array( 'content_items_processed', 'links_extracted', 'links_audited', 'skipped_external', 'unique_destinations_checked', 'http_requests', 'actionable_issues' );
+		$result_keys     = array( 'source_id', 'source_title', 'source_type', 'source_url', 'source_edit_url', 'linked_url', 'http_status', 'redirect_count', 'final_url', 'warning', 'anchor_text', 'result', 'result_code', 'is_same_site', 'direct_target_id', 'final_target_id', 'coverage_target_id', 'link_kind_code' );
+
+		if (
+			! self::array_has_exact_keys( $baseline, $top_keys ) ||
+			self::BASELINE_FORMAT !== $baseline['format'] ||
+			1 !== $baseline['schema_version'] ||
+			! is_array( $baseline['settings'] ) ||
+			! self::array_has_exact_keys( $baseline['settings'], $settings_keys ) ||
+			! is_array( $baseline['scope'] ) ||
+			! self::array_has_exact_keys( $baseline['scope'], $scope_keys ) ||
+			! is_array( $baseline['completion'] ) ||
+			! self::array_has_exact_keys( $baseline['completion'], $completion_keys ) ||
+			! is_array( $baseline['stats'] ) ||
+			! self::array_has_exact_keys( $baseline['stats'], $stats_keys ) ||
+			! is_array( $baseline['results'] ) ||
+			! self::is_list_array( $baseline['results'] )
+		) {
+			return new WP_Error( 'baseline_invalid_schema', __( 'This saved-scan file format is not supported.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$results = array();
+		foreach ( $baseline['results'] as $row ) {
+			if ( ! is_array( $row ) || ! self::array_has_exact_keys( $row, $result_keys ) ) {
+				return new WP_Error( 'baseline_invalid_schema', __( 'A saved link result contains unsupported fields.', 'indexlane-redirect-internal-link-auditor' ) );
+			}
+
+			$source_id  = isset( $row['source_id'] ) ? max( 0, (int) $row['source_id'] ) : 0;
+			$source_key = $source_id > 0
+				? 'content:legacy:' . $source_id
+				: 'content:legacy:' . substr( hash( 'sha256', (string) $row['source_url'] . "\n" . (string) $row['source_title'] ), 0, 32 );
+			$results[] = array_merge(
+				array(
+					'source_id'         => $row['source_id'],
+					'source_key'        => $source_key,
+					'source_title'      => $row['source_title'],
+					'source_type'       => $row['source_type'],
+					'source_type_code'  => 'content',
+					'source_context'    => 'contextual',
+					'source_content_id' => $source_id,
+				),
+				array_diff_key( $row, array( 'source_id' => true, 'source_title' => true, 'source_type' => true ) )
+			);
+		}
+
+		$baseline['schema_version']            = self::BASELINE_SCHEMA_VERSION;
+		$baseline['settings']['source_types']  = array( 'content' );
+		$baseline['scope']                     = array(
+			'source_types'  => array( 'content' ),
+			'post_types'    => $baseline['scope']['post_types'],
+			'content_scope' => $baseline['scope']['content_scope'],
+			'content_limit' => $baseline['scope']['content_limit'],
+			'total_sources' => $baseline['scope']['total_items'],
+			'content_items' => $baseline['scope']['total_items'],
+		);
+		$baseline['completion']                = array(
+			'status'                       => $baseline['completion']['status'],
+			'complete'                     => $baseline['completion']['complete'],
+			'sources_done'                 => $baseline['completion']['content_done'],
+			'request_limit'                => $baseline['completion']['request_limit'],
+			'http_requests'                => $baseline['completion']['http_requests'],
+			'request_allowance_remaining'  => $baseline['completion']['request_allowance_remaining'],
+			'request_allowance_extensions' => $baseline['completion']['request_allowance_extensions'],
+		);
+		$baseline['stats']['sources_processed'] = $baseline['stats']['content_items_processed'];
+		$baseline['results']                    = $results;
+
+		return $baseline;
+	}
+
+	/**
 	 * Validate and normalize a baseline document.
 	 *
 	 * @param array<string,mixed> $baseline      Decoded baseline.
@@ -96,6 +183,13 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 * @return array<string,mixed>|WP_Error
 	 */
 	private static function validate_baseline( array $baseline, bool $validate_site = true ) {
+		if ( isset( $baseline['schema_version'] ) && 1 === $baseline['schema_version'] ) {
+			$baseline = self::upgrade_legacy_baseline( $baseline );
+			if ( is_wp_error( $baseline ) ) {
+				return $baseline;
+			}
+		}
+
 		$top_keys = array( 'format', 'schema_version', 'baseline_id', 'plugin_version', 'site_url', 'scan_id', 'scan_utc', 'saved_utc', 'settings', 'scope', 'completion', 'stats', 'content_items', 'results' );
 		if ( ! self::array_has_exact_keys( $baseline, $top_keys ) || self::BASELINE_FORMAT !== $baseline['format'] || self::BASELINE_SCHEMA_VERSION !== $baseline['schema_version'] ) {
 			return new WP_Error( 'baseline_invalid_schema', __( 'This saved-scan file format is not supported.', 'indexlane-redirect-internal-link-auditor' ) );
@@ -127,19 +221,25 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			return $settings;
 		}
 
-		$scope_keys = array( 'post_types', 'content_scope', 'content_limit', 'total_items' );
+		$scope_keys = array( 'source_types', 'post_types', 'content_scope', 'content_limit', 'total_sources', 'content_items' );
 		$scope      = $baseline['scope'];
 		if (
 			! is_array( $scope ) ||
 			! self::array_has_exact_keys( $scope, $scope_keys ) ||
+			! is_array( $scope['source_types'] ) ||
+			$scope['source_types'] !== $settings['source_types'] ||
 			! is_array( $scope['post_types'] ) ||
 			$scope['post_types'] !== $settings['post_types'] ||
 			$scope['content_scope'] !== $settings['content_scope'] ||
-			! is_int( $scope['total_items'] ) ||
-			$scope['total_items'] < 0 ||
-			$scope['total_items'] > self::MAX_BASELINE_CONTENT_ITEMS
+			! is_int( $scope['total_sources'] ) ||
+			$scope['total_sources'] < 0 ||
+			$scope['total_sources'] > self::MAX_SESSION_SOURCE_ITEMS ||
+			! is_int( $scope['content_items'] ) ||
+			$scope['content_items'] < 0 ||
+			$scope['content_items'] > self::MAX_BASELINE_CONTENT_ITEMS ||
+			$scope['content_items'] > $scope['total_sources']
 		) {
-			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved content scope does not match the scan settings.', 'indexlane-redirect-internal-link-auditor' ) );
+			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved source scope does not match the scan settings.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 		$expected_limit = 'all' === $settings['content_scope'] ? null : $settings['max_posts'];
 		if ( $expected_limit !== $scope['content_limit'] ) {
@@ -151,14 +251,14 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			return $stats;
 		}
 
-		$completion_keys = array( 'status', 'complete', 'content_done', 'request_limit', 'http_requests', 'request_allowance_remaining', 'request_allowance_extensions' );
+		$completion_keys = array( 'status', 'complete', 'sources_done', 'request_limit', 'http_requests', 'request_allowance_remaining', 'request_allowance_extensions' );
 		$completion      = $baseline['completion'];
 		if (
 			! is_array( $completion ) ||
 			! self::array_has_exact_keys( $completion, $completion_keys ) ||
 			'complete' !== $completion['status'] ||
 			true !== $completion['complete'] ||
-			true !== $completion['content_done'] ||
+			true !== $completion['sources_done'] ||
 			! is_int( $completion['request_limit'] ) ||
 			! is_int( $completion['http_requests'] ) ||
 			! is_int( $completion['request_allowance_remaining'] ) ||
@@ -209,7 +309,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 
 		if (
 			count( $content_items ) !== $stats['content_items_processed'] ||
-			$scope['total_items'] !== $stats['content_items_processed'] ||
+			$scope['content_items'] !== $stats['content_items_processed'] ||
+			$scope['total_sources'] !== $stats['sources_processed'] ||
 			count( $results ) !== $stats['links_audited'] ||
 			$actionable_count !== $stats['actionable_issues']
 		) {
@@ -227,15 +328,17 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			'saved_utc'      => (string) $baseline['saved_utc'],
 			'settings'       => $settings,
 			'scope'          => array(
+				'source_types'  => $settings['source_types'],
 				'post_types'    => $settings['post_types'],
 				'content_scope' => (string) $scope['content_scope'],
 				'content_limit' => $scope['content_limit'],
-				'total_items'   => (int) $scope['total_items'],
+				'total_sources' => (int) $scope['total_sources'],
+				'content_items' => (int) $scope['content_items'],
 			),
 			'completion'     => array(
 				'status'                       => 'complete',
 				'complete'                     => true,
-				'content_done'                 => true,
+				'sources_done'                 => true,
 				'request_limit'                => (int) $completion['request_limit'],
 				'http_requests'                => (int) $completion['http_requests'],
 				'request_allowance_remaining'  => (int) $completion['request_allowance_remaining'],
@@ -254,9 +357,24 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 * @return array<string,mixed>|WP_Error
 	 */
 	private static function validate_baseline_settings( $settings ) {
-		$keys = array( 'post_types', 'old_domains', 'content_scope', 'max_posts', 'timeout', 'max_redirects' );
-		if ( ! is_array( $settings ) || ! self::array_has_exact_keys( $settings, $keys ) || ! is_array( $settings['post_types'] ) || ! self::is_list_array( $settings['post_types'] ) ) {
+		$keys = array( 'source_types', 'post_types', 'old_domains', 'content_scope', 'max_posts', 'timeout', 'max_redirects' );
+		if (
+			! is_array( $settings ) ||
+			! self::array_has_exact_keys( $settings, $keys ) ||
+			! is_array( $settings['source_types'] ) ||
+			! self::is_list_array( $settings['source_types'] ) ||
+			! is_array( $settings['post_types'] ) ||
+			! self::is_list_array( $settings['post_types'] )
+		) {
 			return new WP_Error( 'baseline_invalid_schema', __( 'The saved scan settings are invalid.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$source_types = array();
+		foreach ( $settings['source_types'] as $source_type ) {
+			if ( ! is_string( $source_type ) || ! preg_match( '/^[a-z0-9][a-z0-9_-]{0,63}$/', $source_type ) || in_array( $source_type, $source_types, true ) ) {
+				return new WP_Error( 'baseline_invalid_evidence', __( 'The saved scan contains an invalid or duplicate link source.', 'indexlane-redirect-internal-link-auditor' ) );
+			}
+			$source_types[] = $source_type;
 		}
 
 		$post_types = array();
@@ -268,7 +386,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		}
 
 		if (
-			empty( $post_types ) ||
+			empty( $source_types ) ||
+			( in_array( 'content', $source_types, true ) && empty( $post_types ) ) ||
 			! is_string( $settings['old_domains'] ) ||
 			strlen( $settings['old_domains'] ) > 20000 ||
 			! in_array( $settings['content_scope'], array( 'all', 'limit' ), true ) ||
@@ -286,6 +405,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		}
 
 		return array(
+			'source_types'  => $source_types,
 			'post_types'    => $post_types,
 			'old_domains'   => (string) $settings['old_domains'],
 			'content_scope' => (string) $settings['content_scope'],
@@ -355,20 +475,23 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 * @return array<string,mixed>|WP_Error
 	 */
 	private static function validate_baseline_result_row( $row ) {
-		$keys = array( 'source_id', 'source_title', 'source_type', 'source_url', 'source_edit_url', 'linked_url', 'http_status', 'redirect_count', 'final_url', 'warning', 'anchor_text', 'result', 'result_code', 'is_same_site', 'direct_target_id', 'final_target_id', 'coverage_target_id', 'link_kind_code' );
+		$keys = array( 'source_id', 'source_key', 'source_title', 'source_type', 'source_type_code', 'source_context', 'source_content_id', 'source_url', 'source_edit_url', 'linked_url', 'http_status', 'redirect_count', 'final_url', 'warning', 'anchor_text', 'result', 'result_code', 'is_same_site', 'direct_target_id', 'final_target_id', 'coverage_target_id', 'link_kind_code' );
 		if ( ! is_array( $row ) || ! self::array_has_exact_keys( $row, $keys ) ) {
 			return new WP_Error( 'baseline_invalid_schema', __( 'A saved link result contains unsupported fields.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
-		foreach ( array( 'source_id', 'redirect_count', 'direct_target_id', 'final_target_id', 'coverage_target_id' ) as $integer_key ) {
+		foreach ( array( 'source_id', 'source_content_id', 'redirect_count', 'direct_target_id', 'final_target_id', 'coverage_target_id' ) as $integer_key ) {
 			if ( ! is_int( $row[ $integer_key ] ) || $row[ $integer_key ] < 0 ) {
 				return new WP_Error( 'baseline_invalid_evidence', __( 'A saved link result contains an invalid number.', 'indexlane-redirect-internal-link-auditor' ) );
 			}
 		}
 
 		$string_limits = array(
+			'source_key'      => 300,
 			'source_title'    => 1000,
 			'source_type'     => 200,
+			'source_type_code' => 64,
+			'source_context'  => 20,
 			'source_url'      => 2048,
 			'source_edit_url' => 2048,
 			'linked_url'      => 2048,
@@ -385,6 +508,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		}
 
 		if (
+			! preg_match( '/^[A-Za-z0-9][A-Za-z0-9:._\/-]{0,299}$/', $row['source_key'] ) ||
+			! preg_match( '/^[a-z0-9][a-z0-9_-]{0,63}$/', $row['source_type_code'] ) ||
+			! in_array( $row['source_context'], array( 'contextual', 'shared' ), true ) ||
+			( 'shared' === $row['source_context'] && 0 !== $row['source_content_id'] ) ||
+			( 'content' === $row['source_type_code'] && ( 'contextual' !== $row['source_context'] || $row['source_content_id'] !== $row['source_id'] ) ) ||
 			( '' !== $row['http_status'] && ! preg_match( '/^[1-5][0-9]{2}(?: -> [1-5][0-9]{2})*$/', $row['http_status'] ) ) ||
 			! is_string( $row['result_code'] ) ||
 			! in_array( $row['result_code'], array( 'ok', 'warning', 'needs_review', 'blocked', 'error' ), true ) ||
@@ -501,8 +629,23 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 * @return array<string,mixed>|WP_Error
 	 */
 	private static function verification_settings_from_baseline( array $baseline ) {
+		$available_sources = array_keys( self::get_available_source_types() );
+		$missing_sources   = array_values( array_diff( $baseline['settings']['source_types'], $available_sources ) );
+		if ( ! empty( $missing_sources ) ) {
+			return new WP_Error(
+				'baseline_missing_source_provider',
+				sprintf(
+					/* translators: %s: comma-separated source provider IDs unavailable on the current site */
+					__( 'The fix check cannot use the saved scope because these link sources are unavailable: %s.', 'indexlane-redirect-internal-link-auditor' ),
+					implode( ', ', $missing_sources )
+				)
+			);
+		}
+
 		$available = array_keys( self::get_available_post_types() );
-		$missing   = array_values( array_diff( $baseline['settings']['post_types'], $available ) );
+		$missing   = in_array( 'content', $baseline['settings']['source_types'], true )
+			? array_values( array_diff( $baseline['settings']['post_types'], $available ) )
+			: array();
 		if ( ! empty( $missing ) ) {
 			return new WP_Error(
 				'baseline_missing_post_type',
@@ -515,7 +658,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		}
 
 		$settings = self::get_request_settings( $baseline['settings'] );
-		if ( $settings['post_types'] !== $baseline['settings']['post_types'] ) {
+		if ( $settings['source_types'] !== $baseline['settings']['source_types'] || $settings['post_types'] !== $baseline['settings']['post_types'] ) {
 			return new WP_Error( 'baseline_invalid_evidence', __( 'The saved scan scope can no longer be reproduced exactly.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
@@ -769,7 +912,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			}
 
 			$source_id  = isset( $row['source_id'] ) ? max( 0, (int) $row['source_id'] ) : 0;
-			$source_key = $source_id > 0 ? 'id:' . $source_id : self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' );
+			$source_key = isset( $row['source_key'] ) && '' !== trim( (string) $row['source_key'] )
+				? (string) $row['source_key']
+				: ( $source_id > 0 ? 'id:' . $source_id : self::normalize_destination_for_impact( isset( $row['source_url'] ) ? (string) $row['source_url'] : '' ) );
 			if ( '' === $source_key ) {
 				$source_key = 'source:' . ( isset( $row['source_title'] ) ? trim( (string) $row['source_title'] ) : '' );
 			}
@@ -921,7 +1066,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			'final_url'             => __( 'final URL', 'indexlane-redirect-internal-link-auditor' ),
 			'result_code'           => __( 'outcome', 'indexlane-redirect-internal-link-auditor' ),
 			'occurrence_count'      => __( 'times linked', 'indexlane-redirect-internal-link-auditor' ),
-			'affected_source_count' => __( 'content items affected', 'indexlane-redirect-internal-link-auditor' ),
+			'affected_source_count' => __( 'editable sources affected', 'indexlane-redirect-internal-link-auditor' ),
 		);
 
 		$output = array();
@@ -940,25 +1085,40 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 * @param array<string,mixed> $baseline Baseline.
 	 */
 	private static function baseline_scope_label( array $baseline ): string {
-		$labels = array();
+		$content_labels = array();
 		foreach ( $baseline['settings']['post_types'] as $post_type ) {
-			$object   = get_post_type_object( $post_type );
-			$labels[] = $object && isset( $object->labels->name ) ? (string) $object->labels->name : $post_type;
+			$object           = get_post_type_object( $post_type );
+			$content_labels[] = $object && isset( $object->labels->name ) ? (string) $object->labels->name : $post_type;
 		}
 
-		if ( 'all' === $baseline['settings']['content_scope'] ) {
-			return sprintf(
+		$available     = self::get_available_source_types();
+		$source_labels = array();
+		foreach ( $baseline['settings']['source_types'] as $source_type ) {
+			$source_labels[] = isset( $available[ $source_type ]['label'] ) ? $available[ $source_type ]['label'] : $source_type;
+		}
+
+		if ( ! in_array( 'content', $baseline['settings']['source_types'], true ) ) {
+			$content_scope = __( 'Published content not selected.', 'indexlane-redirect-internal-link-auditor' );
+		} elseif ( 'all' === $baseline['settings']['content_scope'] ) {
+			$content_scope = sprintf(
 				/* translators: %s: comma-separated content type labels */
 				__( 'All published content: %s', 'indexlane-redirect-internal-link-auditor' ),
-				implode( ', ', $labels )
+				implode( ', ', $content_labels )
+			);
+		} else {
+			$content_scope = sprintf(
+				/* translators: 1: maximum content item count, 2: comma-separated content type labels */
+				__( 'Newest %1$d content items: %2$s', 'indexlane-redirect-internal-link-auditor' ),
+				(int) $baseline['settings']['max_posts'],
+				implode( ', ', $content_labels )
 			);
 		}
 
 		return sprintf(
-			/* translators: 1: maximum content item count, 2: comma-separated content type labels */
-			__( 'Newest %1$d content items: %2$s', 'indexlane-redirect-internal-link-auditor' ),
-			(int) $baseline['settings']['max_posts'],
-			implode( ', ', $labels )
+			/* translators: 1: comma-separated stored source labels, 2: selected content scope */
+			__( 'Sources: %1$s. %2$s', 'indexlane-redirect-internal-link-auditor' ),
+			implode( ', ', $source_labels ),
+			$content_scope
 		);
 	}
 
@@ -1110,8 +1270,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 				self::csv_safe( __( 'Latest Scan Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Saved Scan Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Latest Scan Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Saved Scan Content Items Affected', 'indexlane-redirect-internal-link-auditor' ) ),
-				self::csv_safe( __( 'Latest Scan Content Items Affected', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Editable Sources Affected', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Editable Sources Affected', 'indexlane-redirect-internal-link-auditor' ) ),
 			),
 		);
 

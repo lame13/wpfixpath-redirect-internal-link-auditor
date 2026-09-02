@@ -17,6 +17,7 @@ $GLOBALS['indexlane_test_user_id']    = 7;
 $GLOBALS['indexlane_test_uuid_count'] = 0;
 $GLOBALS['indexlane_test_translations'] = array();
 $GLOBALS['indexlane_test_actions']      = array();
+$GLOBALS['indexlane_test_filters']      = array();
 $GLOBALS['indexlane_test_admin_pages']  = array();
 $GLOBALS['indexlane_test_styles']       = array();
 $GLOBALS['indexlane_test_scripts']      = array();
@@ -46,6 +47,38 @@ class WP_Error {
 
 function add_action( string $hook_name, $callback ): void {
 	$GLOBALS['indexlane_test_actions'][ $hook_name ][] = $callback;
+}
+function add_filter( string $hook_name, $callback, int $priority = 10, int $accepted_args = 1 ): bool {
+	$GLOBALS['indexlane_test_filters'][ $hook_name ][ $priority ][] = array(
+		'callback'      => $callback,
+		'accepted_args' => $accepted_args,
+	);
+	return true;
+}
+function remove_filter( string $hook_name, $callback, int $priority = 10 ): bool {
+	if ( empty( $GLOBALS['indexlane_test_filters'][ $hook_name ][ $priority ] ) ) {
+		return false;
+	}
+	foreach ( $GLOBALS['indexlane_test_filters'][ $hook_name ][ $priority ] as $index => $registered ) {
+		if ( $registered['callback'] === $callback ) {
+			unset( $GLOBALS['indexlane_test_filters'][ $hook_name ][ $priority ][ $index ] );
+			return true;
+		}
+	}
+	return false;
+}
+function apply_filters( string $hook_name, $value, ...$args ) {
+	if ( empty( $GLOBALS['indexlane_test_filters'][ $hook_name ] ) ) {
+		return $value;
+	}
+	ksort( $GLOBALS['indexlane_test_filters'][ $hook_name ], SORT_NUMERIC );
+	foreach ( $GLOBALS['indexlane_test_filters'][ $hook_name ] as $callbacks ) {
+		foreach ( $callbacks as $registered ) {
+			$arguments = array_slice( array_merge( array( $value ), $args ), 0, $registered['accepted_args'] );
+			$value     = call_user_func_array( $registered['callback'], $arguments );
+		}
+	}
+	return $value;
 }
 function add_management_page( string $page_title, string $menu_title, string $capability, string $menu_slug, $callback ): string {
 	$GLOBALS['indexlane_test_admin_pages'][] = array(
@@ -127,6 +160,12 @@ function sanitize_textarea_field( string $value ): string {
 function sanitize_text_field( string $value ): string {
 	return trim( strip_tags( str_replace( "\0", '', $value ) ) );
 }
+function wp_specialchars_decode( string $value, int $flags = ENT_QUOTES ): string {
+	return html_entity_decode( $value, $flags | ENT_HTML5, 'UTF-8' );
+}
+function wp_strip_all_tags( string $value ): string {
+	return strip_tags( $value );
+}
 function absint( $value ): int {
 	return abs( (int) $value );
 }
@@ -137,6 +176,10 @@ function __( string $text ): string {
 	return isset( $GLOBALS['indexlane_test_translations'][ $text ] )
 		? $GLOBALS['indexlane_test_translations'][ $text ]
 		: $text;
+}
+function _n( string $single, string $plural, int $number, string $domain = 'default' ): string {
+	unset( $domain );
+	return __( 1 === $number ? $single : $plural );
 }
 function is_wp_error( $value ): bool {
 	return $value instanceof WP_Error;
@@ -354,11 +397,15 @@ function indexlane_result_row(
 	);
 	$result_code  = isset( $result_codes[ $result ] ) ? $result_codes[ $result ] : 'needs_review';
 
-	return array_merge(
+	$row = array_merge(
 		array(
 			'source_id'       => 0,
+			'source_key'      => 'content:test:' . substr( hash( 'sha256', strtolower( (string) preg_replace( '/#.*$/', '', $source_url ) ) ), 0, 16 ),
 			'source_title'    => $source_title,
 			'source_type'     => 'Page',
+			'source_type_code' => 'content',
+			'source_context'  => 'contextual',
+			'source_content_id' => 0,
 			'source_url'      => $source_url,
 			'source_edit_url' => 'https://example.test/wp-admin/post.php?post=1&action=edit',
 			'linked_url'      => $linked_url,
@@ -377,6 +424,11 @@ function indexlane_result_row(
 		),
 		$extra
 	);
+	if ( ! array_key_exists( 'source_content_id', $extra ) ) {
+		$row['source_content_id'] = (int) $row['source_id'];
+	}
+
+	return $row;
 }
 
 $without_slash = indexlane_invoke( 'normalize_url_for_compare', array( 'https://Example.test/foo#section' ) );
@@ -393,6 +445,198 @@ indexlane_assert_same(
 	indexlane_invoke( 'normalize_destination_for_impact', array( 'https://example.test/foo/?page=2#fragment' ) ),
 	'Impact grouping should preserve trailing slashes and query strings.'
 );
+
+$attribute_links = indexlane_invoke(
+	'extract_navigation_attribute_links',
+	array(
+		array(
+			array(
+				'blockName'   => 'core/navigation-link',
+				'attrs'       => array( 'url' => '/stored-navigation', 'label' => 'Stored navigation' ),
+				'innerBlocks' => array(),
+			),
+			array(
+				'blockName'   => 'core/navigation-submenu',
+				'attrs'       => array( 'url' => '/parent', 'label' => 'Parent' ),
+				'innerBlocks' => array(
+					array(
+						'blockName'   => 'core/navigation-link',
+						'attrs'       => array( 'url' => '/child', 'label' => 'Child' ),
+						'innerBlocks' => array(),
+					),
+				),
+			),
+			array(
+				'blockName'   => 'core/social-link',
+				'attrs'       => array( 'url' => '/serialized-social' ),
+				'innerHTML'   => '<li><a href="/serialized-social"><span>Social profile</span></a></li>',
+				'innerBlocks' => array(),
+			),
+		)
+	)
+);
+indexlane_assert_same(
+	array(
+		array( 'href' => '/stored-navigation', 'anchor' => 'Stored navigation' ),
+		array( 'href' => '/parent', 'anchor' => 'Parent' ),
+		array( 'href' => '/child', 'anchor' => 'Child' ),
+	),
+	$attribute_links,
+	'Self-closing Navigation blocks must retain stored URLs without duplicating links already present in serialized markup.'
+);
+
+$invalid_shared_content = indexlane_invoke(
+	'normalize_source_record',
+	array(
+		array(
+			'key'        => 'fixture:shared-content',
+			'id'         => 9,
+			'content_id' => 9,
+			'title'      => 'Invalid shared content',
+			'type'       => 'Fixture surface',
+			'context'    => 'shared',
+			'base_url'   => 'https://example.test/',
+			'links'      => array(),
+		),
+		'fixture',
+		array( 'label' => 'Fixture surface', 'context' => 'shared' ),
+	)
+);
+indexlane_assert_same( true, is_wp_error( $invalid_shared_content ), 'Shared providers must not masquerade as contextual content targets.' );
+
+$invalid_content_target = indexlane_invoke(
+	'normalize_source_record',
+	array(
+		array(
+			'key'        => 'fixture:invalid-target',
+			'id'         => 10,
+			'content_id' => 10,
+			'title'      => 'Invalid target',
+			'type'       => 'Fixture content',
+			'context'    => 'contextual',
+			'base_url'   => 'https://example.test/',
+			'links'      => array(),
+			'content_item' => array(
+				'id'       => 10,
+				'title'    => 'Invalid target',
+				'type'     => 'Fixture content',
+				'url'      => 'javascript:alert(1)',
+				'edit_url' => 'https://example.test/wp-admin/post.php?post=10&action=edit',
+			),
+		),
+		'fixture',
+		array( 'label' => 'Fixture content', 'context' => 'contextual' ),
+	)
+);
+indexlane_assert_same( true, is_wp_error( $invalid_content_target ), 'Provider coverage targets must use bounded HTTP URLs.' );
+
+$pending_source_session = array(
+	'settings'      => array( 'old_domain_hosts' => array() ),
+	'stats'         => indexlane_invoke( 'empty_stats' ),
+	'content_items' => array(),
+	'content_item_ids' => array(),
+	'results'       => array(),
+	'checked_urls'  => array(),
+	'pending_checks' => array(),
+);
+$pending_source_session = indexlane_invoke(
+	'process_source_item',
+	array(
+		$pending_source_session,
+		array(
+			'key'          => 'fixture:large-stored-source',
+			'id'           => 11,
+			'content_id'   => 0,
+			'title'        => 'Large stored source',
+			'type'         => 'Fixture surface',
+			'type_code'    => 'fixture',
+			'context'      => 'shared',
+			'url'          => '',
+			'edit_url'     => 'https://example.test/wp-admin/fixture.php?id=11',
+			'base_url'     => 'https://example.test/',
+			'content'      => str_repeat( 'stored source body', 1000 ),
+			'links'        => array( array( 'href' => '/pending-target', 'anchor' => 'Pending target' ) ),
+			'content_item' => null,
+		),
+	)
+);
+$pending_source_check      = reset( $pending_source_session['pending_checks'] );
+$pending_source_occurrence = $pending_source_check['occurrences'][0]['source'];
+indexlane_assert_same( false, array_key_exists( 'content', $pending_source_occurrence ), 'Pending HTTP work must not duplicate a stored source body in the scan transient.' );
+indexlane_assert_same( false, array_key_exists( 'links', $pending_source_occurrence ), 'Pending HTTP work must not duplicate an extracted link list in the scan transient.' );
+indexlane_assert_same( false, array_key_exists( 'content_item', $pending_source_occurrence ), 'Pending HTTP work must retain only source identity evidence.' );
+
+$fixture_provider_filter = static function ( array $providers ): array {
+	$providers['fixture_shared'] = array(
+		'label'       => 'Fixture shared sources',
+		'description' => 'Behavioral provider fixture.',
+		'context'     => 'shared',
+		'default'     => false,
+		'snapshot_callback' => static function ( array $settings ): array {
+			unset( $settings );
+			return array( 'total_items' => 2, 'cursor' => array( 'offset' => 0 ) );
+		},
+		'next_callback' => static function ( array $cursor, array $settings ): array {
+			unset( $settings );
+			$offset           = isset( $cursor['offset'] ) ? (int) $cursor['offset'] : 0;
+			$cursor['offset'] = $offset + 1;
+			return array(
+				'source' => array(
+					'key'      => 'fixture:' . ( $offset + 1 ),
+					'id'       => $offset + 1,
+					'title'    => 'Shared fixture ' . ( $offset + 1 ),
+					'type'     => 'Fixture surface',
+					'context'  => 'shared',
+					'url'      => '',
+					'edit_url' => 'https://example.test/wp-admin/fixture.php?id=' . ( $offset + 1 ),
+					'base_url' => 'https://example.test/',
+					'links'    => array( array( 'href' => '/provider-target', 'anchor' => 'Provider target' ) ),
+				),
+				'cursor' => $cursor,
+				'done'   => $cursor['offset'] >= 2,
+			);
+		},
+	);
+
+	return $providers;
+};
+add_filter( 'indexlane_rila_source_providers', $fixture_provider_filter );
+$provider_settings = indexlane_invoke(
+	'get_request_settings',
+	array(
+		array(
+			'source_types_present' => '1',
+			'source_types'         => array( 'fixture_shared' ),
+			'content_scope'        => 'all',
+			'timeout'              => 2,
+			'max_redirects'        => 5,
+		)
+	)
+);
+indexlane_assert_same( array( 'fixture_shared' ), $provider_settings['source_types'], 'The public provider filter must make an added source selectable.' );
+$GLOBALS['indexlane_test_http_calls'] = array();
+$GLOBALS['indexlane_test_responses']  = array( 'https://example.test/provider-target' => indexlane_response( 200 ) );
+$provider_session = indexlane_invoke( 'create_scan_session', array( $provider_settings ) );
+indexlane_assert_same( false, is_wp_error( $provider_session ), 'A valid filtered provider must create a resumable scan session.' );
+$provider_session = indexlane_invoke( 'process_scan_batch', array( $provider_session ) );
+indexlane_assert_same( 'complete', $provider_session['status'], 'A filtered provider must complete through the normal bounded scan engine.' );
+indexlane_assert_same( 2, $provider_session['stats']['sources_processed'], 'Provider progress must count stored sources independently from content items.' );
+indexlane_assert_same( 0, $provider_session['stats']['content_items_processed'], 'Shared provider sources must not become content coverage targets.' );
+indexlane_assert_same( 1, $provider_session['stats']['http_requests'], 'Request deduplication must span every source from a filtered provider.' );
+indexlane_assert_same( 2, count( $provider_session['results'] ), 'Each provider occurrence must retain exact evidence.' );
+indexlane_assert_same( 'fixture:1', $provider_session['results'][0]['source_key'], 'Provider evidence must retain its exact stable source identity.' );
+indexlane_assert_same( 'shared', $provider_session['results'][0]['source_context'], 'Provider evidence must retain contextual-versus-shared scope.' );
+$provider_baseline = indexlane_invoke( 'build_baseline_from_session', array( $provider_session ) );
+indexlane_assert_same( false, is_wp_error( $provider_baseline ), 'A shared-only provider scan must remain portable saved evidence.' );
+indexlane_assert_same( 2, $provider_baseline['scope']['total_sources'], 'Saved evidence must retain shared sources independently from content targets.' );
+indexlane_assert_same( 0, $provider_baseline['scope']['content_items'], 'A shared-only saved scan must not invent content coverage targets.' );
+$orphaned_provider_session = indexlane_invoke( 'create_scan_session', array( $provider_settings ) );
+remove_filter( 'indexlane_rila_source_providers', $fixture_provider_filter );
+$orphaned_provider_session = indexlane_invoke( 'process_scan_batch', array( $orphaned_provider_session ) );
+indexlane_assert_same( 'failed', $orphaned_provider_session['status'], 'A paused scan must stop safely when its selected provider disappears.' );
+indexlane_assert_same( 0, $orphaned_provider_session['stats']['sources_processed'], 'A missing provider must not create partial source evidence.' );
+$GLOBALS['indexlane_test_http_calls'] = array();
+$GLOBALS['indexlane_test_responses']  = array();
 
 $impact_input = array(
 	indexlane_result_row(
@@ -502,7 +746,11 @@ indexlane_assert_same( $http_calls_before_impact, count( $GLOBALS['indexlane_tes
 indexlane_assert_same( 8, count( $impact_rows ), 'Only broken/error and redirected destinations should appear in the impact view.' );
 indexlane_assert_same( 'https://example.test/broken', $impact_rows[0]['destination_url'], 'The highest-impact destination should sort first.' );
 indexlane_assert_same( 3, $impact_rows[0]['occurrences'], 'Repeated links should count as separate occurrences.' );
-indexlane_assert_same( 2, $impact_rows[0]['affected_sources'], 'Repeated links in one source should count as one affected content item.' );
+indexlane_assert_same( 2, $impact_rows[0]['affected_sources'], 'Repeated links in one source should count as one affected editable source.' );
+indexlane_assert_same( 2, count( $impact_rows[0]['affected_source_details'] ), 'Problem URLs must retain the exact editable sources behind the aggregate.' );
+$impact_source_occurrences = array_column( $impact_rows[0]['affected_source_details'], 'occurrences' );
+sort( $impact_source_occurrences, SORT_NUMERIC );
+indexlane_assert_same( array( 1, 2 ), $impact_source_occurrences, 'Per-source impact evidence must retain repeated occurrences in one source.' );
 indexlane_assert_same( 'Broken/error after redirect', $impact_rows[0]['impact'], 'A broken target with redirect evidence should expose both conditions.' );
 indexlane_assert_same( '301 -> 404 | 404', $impact_rows[0]['http_status_evidence'], 'Status variants should be deduplicated and sorted deterministically.' );
 indexlane_assert_same( 1, $impact_rows[0]['max_redirect_count'], 'The aggregate should retain the maximum observed redirect count.' );
@@ -574,9 +822,9 @@ $details_csv = indexlane_invoke(
 		'details',
 	)
 );
-indexlane_assert_same( 'Content Item', $details_csv[0][0], 'Detailed CSV should begin with the content item.' );
+indexlane_assert_same( 'Source', $details_csv[0][0], 'Detailed CSV should begin with the editable source.' );
 indexlane_assert_same( '\' =HYPERLINK("https://attacker.test")', $details_csv[1][0], 'CSV safety should block formulas after leading spaces.' );
-indexlane_assert_same( "'\n+SUM(1,1)", $details_csv[1][8], 'CSV safety should block formulas after leading newlines.' );
+indexlane_assert_same( "'\n+SUM(1,1)", $details_csv[1][10], 'CSV safety should block formulas after leading newlines.' );
 
 $impact_csv_input = array(
 	indexlane_result_row(
@@ -591,7 +839,7 @@ $impact_csv_input = array(
 );
 $impact_csv = indexlane_invoke( 'build_csv_rows', array( $impact_csv_input, 'impact' ) );
 indexlane_assert_same( 'URL', $impact_csv[0][0], 'Problem-URL CSV should begin with the URL.' );
-indexlane_assert_same( '\'=IMPORTXML("https://attacker.test") Broken link (404)', $impact_csv[1][8], 'Impact evidence should receive the same CSV formula protection.' );
+indexlane_assert_same( '\'=IMPORTXML("https://attacker.test") Broken link (404)', $impact_csv[1][10], 'Impact evidence should receive the same CSV formula protection.' );
 indexlane_assert_same( "'\t@SUM(1,1)", indexlane_invoke( 'csv_safe', array( "\t@SUM(1,1)" ) ), 'CSV safety should block formulas after a leading tab.' );
 indexlane_assert_same( "'-2+3", indexlane_invoke( 'csv_safe', array( '-2+3' ) ), 'CSV safety should block minus-prefixed formulas.' );
 indexlane_assert_same( ' ordinary text', indexlane_invoke( 'csv_safe', array( ' ordinary text' ) ), 'CSV safety should not alter non-formula text.' );
@@ -719,6 +967,28 @@ $coverage_results = array(
 		'Legacy site',
 		array( 'source_id' => 3, 'is_same_site' => false, 'coverage_target_id' => 0, 'link_kind_code' => 'direct' )
 	),
+	indexlane_result_row(
+		'',
+		'https://example.test/alpha',
+		'200',
+		0,
+		'https://example.test/alpha',
+		'None',
+		'OK',
+		'Footer menu',
+		'Menu alpha',
+		array(
+			'source_id'         => 7,
+			'source_key'        => 'menu:7',
+			'source_type'       => 'Classic menu',
+			'source_type_code'  => 'menu',
+			'source_context'    => 'shared',
+			'source_content_id' => 0,
+			'is_same_site'      => true,
+			'coverage_target_id' => 1,
+			'link_kind_code'    => 'direct',
+		)
+	),
 );
 
 $http_calls_before_coverage = count( $GLOBALS['indexlane_test_http_calls'] );
@@ -726,19 +996,24 @@ $coverage_rows              = indexlane_invoke( 'build_content_link_coverage', a
 indexlane_assert_same( $http_calls_before_coverage, count( $GLOBALS['indexlane_test_http_calls'] ), 'Coverage aggregation must not make HTTP requests.' );
 indexlane_assert_same( 5, count( $coverage_rows ), 'Coverage must contain one row for every item in the saved scanned corpus.' );
 $coverage_by_id = array_column( $coverage_rows, null, 'target_id' );
-indexlane_assert_same( 3, $coverage_by_id[1]['incoming_occurrences'], 'Every direct and redirected occurrence should count toward its final target.' );
-indexlane_assert_same( 2, $coverage_by_id[1]['linking_source_count'], 'Repeated links from one source should count as one linking content item.' );
-indexlane_assert_same( array( 'Alpha guide', 'Legacy alpha', 'Read alpha' ), $coverage_by_id[1]['anchor_text_variants'], 'Target rows should retain every distinct anchor-text variant deterministically.' );
-indexlane_assert_same( 2, $coverage_by_id[1]['direct_incoming'], 'Direct incoming links should remain distinguishable.' );
+indexlane_assert_same( 4, $coverage_by_id[1]['incoming_occurrences'], 'Every contextual, shared, direct, and redirected occurrence should count toward its final target.' );
+indexlane_assert_same( 3, $coverage_by_id[1]['linking_source_count'], 'Repeated links from one source should count as one editable source.' );
+indexlane_assert_same( 3, $coverage_by_id[1]['contextual_incoming'], 'Contextual incoming occurrences must be counted separately.' );
+indexlane_assert_same( 1, $coverage_by_id[1]['shared_incoming'], 'Navigation and shared incoming occurrences must be counted separately.' );
+indexlane_assert_same( 2, $coverage_by_id[1]['contextual_source_count'], 'Distinct contextual sources must remain exact.' );
+indexlane_assert_same( 1, $coverage_by_id[1]['shared_source_count'], 'Distinct shared sources must remain exact.' );
+indexlane_assert_same( array( 'Alpha guide', 'Legacy alpha', 'Menu alpha', 'Read alpha' ), $coverage_by_id[1]['anchor_text_variants'], 'Target rows should retain every distinct anchor-text variant deterministically.' );
+indexlane_assert_same( 3, $coverage_by_id[1]['direct_incoming'], 'Direct incoming links should remain distinguishable.' );
 indexlane_assert_same( 1, $coverage_by_id[1]['redirected_incoming'], 'A redirect to a published target should count toward the final item.' );
-indexlane_assert_same( 'redirected', $coverage_by_id[1]['incoming_details'][2]['link_kind_code'], 'Target detail evidence should retain the redirect classification.' );
-indexlane_assert_same( 'https://example.test/old-alpha', $coverage_by_id[1]['incoming_details'][2]['linked_url'], 'Target detail evidence should retain the originally linked redirect URL.' );
-indexlane_assert_same( 'https://example.test/alpha', $coverage_by_id[1]['incoming_details'][2]['final_url'], 'Target detail evidence should retain the published final URL.' );
+indexlane_assert_same( 'shared', $coverage_by_id[1]['incoming_details'][0]['source_context'], 'Target detail evidence should identify a shared source.' );
+indexlane_assert_same( 'redirected', $coverage_by_id[1]['incoming_details'][3]['link_kind_code'], 'Target detail evidence should retain the redirect classification.' );
+indexlane_assert_same( 'https://example.test/old-alpha', $coverage_by_id[1]['incoming_details'][3]['linked_url'], 'Target detail evidence should retain the originally linked redirect URL.' );
+indexlane_assert_same( 'https://example.test/alpha', $coverage_by_id[1]['incoming_details'][3]['final_url'], 'Target detail evidence should retain the published final URL.' );
 indexlane_assert_same( 3, $coverage_by_id[2]['outgoing_internal_occurrences'], 'Outgoing coverage should count every same-site occurrence from the source.' );
 indexlane_assert_same( 2, $coverage_by_id[2]['distinct_internal_destinations'], 'Repeated outgoing links to one destination should be deduplicated.' );
 indexlane_assert_same( 2, $coverage_by_id[3]['outgoing_internal_occurrences'], 'Outgoing coverage should include published and unresolved same-site destinations.' );
 indexlane_assert_same( 1, $coverage_by_id[5]['self_link_count'], 'Self-links should be counted explicitly.' );
-indexlane_assert_same( 'No incoming links detected in scanned content.', $coverage_by_id[4]['status'], 'Zero-source content must use conservative scanned-content wording.' );
+indexlane_assert_same( 'No incoming links detected in selected sources.', $coverage_by_id[4]['status'], 'Zero-source content must use conservative selected-source wording.' );
 indexlane_assert_same( 'One linking source', $coverage_by_id[3]['status'], 'One-source content should have the planned status.' );
 indexlane_assert_same( 'Multiple linking sources', $coverage_by_id[1]['status'], 'Multi-source content should have the planned status.' );
 
@@ -755,9 +1030,9 @@ $alpha_csv_rows = array_values(
 );
 indexlane_assert_same( 1, count( $alpha_csv_rows ), 'The coverage CSV should contain exactly one Alpha target row.' );
 indexlane_assert_same(
-	array( '3', '2', '0', '0', 'Alpha guide | Legacy alpha | Read alpha', '0', '2', '1', 'Multiple linking sources' ),
-	array_slice( $alpha_csv_rows[0], 2, 9 ),
-	'The coverage CSV should export exact incoming, outgoing, anchor, self-link, and direct/redirect metrics.'
+	array( '4', '3', '1', '3', '0', '0', 'Alpha guide | Legacy alpha | Menu alpha | Read alpha', '0', '3', '1', 'Multiple linking sources' ),
+	array_slice( $alpha_csv_rows[0], 2, 11 ),
+	'The coverage CSV should export exact contextual, shared, source, outgoing, anchor, self-link, and direct/redirect metrics.'
 );
 
 $comparison_old = array(
@@ -804,7 +1079,7 @@ $comparison_csv = indexlane_invoke( 'build_comparison_csv_rows', array( $compari
 indexlane_assert_same( 7, count( $comparison_csv ), 'Comparison CSV must contain every compared issue destination plus its header.' );
 indexlane_assert_same( 'Outcome', $comparison_csv[0][0], 'Comparison CSV must begin with its outcome.' );
 indexlane_assert_same( 'Saved Scan HTTP Status Chain', $comparison_csv[0][4], 'Comparison CSV must expose saved-scan status results explicitly.' );
-indexlane_assert_same( 'Latest Scan Content Items Affected', $comparison_csv[0][15], 'Comparison CSV must expose latest-scan content impact explicitly.' );
+indexlane_assert_same( 'Latest Scan Editable Sources Affected', $comparison_csv[0][15], 'Comparison CSV must expose latest-scan source impact explicitly.' );
 
 $baseline_content_items = array(
 	array(
@@ -823,6 +1098,7 @@ $baseline_content_items = array(
 	),
 );
 $baseline_stats = array(
+	'sources_processed'            => 2,
 	'content_items_processed'    => 2,
 	'links_extracted'             => count( $comparison_old ),
 	'links_audited'               => count( $comparison_old ),
@@ -832,7 +1108,7 @@ $baseline_stats = array(
 	'actionable_issues'           => 7,
 );
 $baseline_session = array(
-	'schema_version'              => 3,
+	'schema_version'              => 4,
 	'id'                          => '12345678-1234-4abc-8def-000000000050',
 	'status'                      => 'complete',
 	'created_at'                  => time() - 60,
@@ -842,6 +1118,7 @@ $baseline_session = array(
 	'baseline_id'                 => '',
 	'baseline_fingerprint'        => '',
 	'settings'                    => array(
+		'source_types'     => array( 'content' ),
 		'post_types'       => array( 'post', 'page' ),
 		'old_domains'      => 'legacy.example',
 		'old_domain_hosts' => array( 'legacy.example' ),
@@ -851,13 +1128,14 @@ $baseline_session = array(
 		'max_redirects'    => 5,
 	),
 	'total_items'                 => 2,
-	'snapshot_max_id'             => 11,
-	'cursor_before_id'            => 10,
-	'content_done'                => true,
+	'source_provider_states'      => array(),
+	'source_provider_index'       => 0,
+	'sources_done'                => true,
 	'request_limit'               => 250,
 	'request_allowance_extensions' => 0,
 	'stats'                       => $baseline_stats,
 	'content_items'               => $baseline_content_items,
+	'content_item_ids'            => array( 10 => true, 11 => true ),
 	'results'                     => $comparison_old,
 	'checked_urls'                => array(),
 	'pending_checks'              => array(),
@@ -866,8 +1144,8 @@ $baseline_session = array(
 $baseline = indexlane_invoke( 'build_baseline_from_session', array( $baseline_session ) );
 indexlane_assert_same( false, is_wp_error( $baseline ), 'A complete consistent scan must produce portable baseline evidence.' );
 indexlane_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'Baseline JSON must identify its document format.' );
-indexlane_assert_same( 1, $baseline['schema_version'], 'Baseline JSON must carry an explicit schema version.' );
-indexlane_assert_same( '0.5.1', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
+indexlane_assert_same( 2, $baseline['schema_version'], 'Baseline JSON must carry an explicit source-aware schema version.' );
+indexlane_assert_same( '0.6.0', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
 indexlane_assert_same( 'https://example.test', $baseline['site_url'], 'Baseline site ownership must use a normalized exact home URL.' );
 indexlane_assert_same( true, $baseline['completion']['complete'], 'Only complete evidence may be saved as a baseline.' );
 indexlane_assert_same( 0, $baseline['completion']['request_allowance_extensions'], 'Baseline metadata must preserve the request-limit extension state.' );
@@ -875,6 +1153,27 @@ indexlane_assert_same( 0, $baseline['completion']['request_allowance_extensions'
 $baseline_json   = wp_json_encode( $baseline, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES );
 $parsed_baseline = indexlane_invoke( 'parse_baseline_json', array( $baseline_json ) );
 indexlane_assert_same( $baseline, $parsed_baseline, 'Exported baseline JSON must round-trip through strict import validation.' );
+
+$legacy_baseline                   = $baseline;
+$legacy_baseline['schema_version'] = 1;
+unset( $legacy_baseline['settings']['source_types'] );
+$legacy_baseline['scope'] = array(
+	'post_types'    => $baseline['scope']['post_types'],
+	'content_scope' => $baseline['scope']['content_scope'],
+	'content_limit' => $baseline['scope']['content_limit'],
+	'total_items'   => $baseline['scope']['content_items'],
+);
+$legacy_baseline['completion']['content_done'] = $legacy_baseline['completion']['sources_done'];
+unset( $legacy_baseline['completion']['sources_done'], $legacy_baseline['stats']['sources_processed'] );
+foreach ( $legacy_baseline['results'] as &$legacy_row ) {
+	unset( $legacy_row['source_key'], $legacy_row['source_type_code'], $legacy_row['source_context'], $legacy_row['source_content_id'] );
+}
+unset( $legacy_row );
+$upgraded_legacy = indexlane_invoke( 'validate_baseline', array( $legacy_baseline, true ) );
+indexlane_assert_same( false, is_wp_error( $upgraded_legacy ), 'Strict 0.5 saved scans must remain importable as content-only evidence.' );
+indexlane_assert_same( 2, $upgraded_legacy['schema_version'], 'A legacy saved scan must normalize to the source-aware schema.' );
+indexlane_assert_same( array( 'content' ), $upgraded_legacy['settings']['source_types'], 'Legacy scans must retain their exact post-content-only scope.' );
+indexlane_assert_same( 'contextual', $upgraded_legacy['results'][0]['source_context'], 'Legacy occurrences must normalize as contextual content sources.' );
 
 $wrong_site             = $baseline;
 $wrong_site['site_url'] = 'https://other.example';
@@ -900,6 +1199,7 @@ $GLOBALS['indexlane_test_user_id'] = 7;
 
 $verification_settings = indexlane_invoke( 'verification_settings_from_baseline', array( $baseline ) );
 indexlane_assert_same( false, is_wp_error( $verification_settings ), 'A verification scan must reproduce currently available baseline scope.' );
+indexlane_assert_same( $baseline['settings']['source_types'], $verification_settings['source_types'], 'Verification must retain the exact saved source providers.' );
 indexlane_assert_same( $baseline['settings']['post_types'], $verification_settings['post_types'], 'Verification must retain the exact saved post types.' );
 indexlane_assert_same( $baseline['settings']['content_scope'], $verification_settings['content_scope'], 'Verification must retain the exact saved content scope.' );
 
@@ -953,9 +1253,14 @@ $pending_checks = array();
 $occurrence     = array(
 	'source'     => array(
 		'id'       => 1,
+		'key'      => 'content:page:1',
+		'content_id' => 1,
 		'title'    => 'Batch source',
 		'type'     => 'Page',
+		'type_code' => 'content',
+		'context'  => 'contextual',
 		'url'      => 'https://example.test/source',
+		'base_url' => 'https://example.test/source',
 		'edit_url' => 'https://example.test/wp-admin/post.php?post=1&action=edit',
 	),
 	'link'       => array( 'href' => '/target', 'anchor' => 'Target' ),
@@ -976,7 +1281,7 @@ for ( $i = 1; $i <= 6; $i++ ) {
 }
 
 $batch_session = array(
-	'schema_version'   => 3,
+	'schema_version'   => 4,
 	'id'               => '12345678-1234-4abc-8def-000000000010',
 	'scan_mode'        => 'standard',
 	'baseline_id'      => '',
@@ -987,7 +1292,7 @@ $batch_session = array(
 	'expires_at'       => time() + 86400,
 	'settings'         => array( 'timeout' => 2.0, 'max_redirects' => 5 ),
 	'total_items'      => 1,
-	'content_done'     => true,
+	'sources_done'     => true,
 	'request_limit'    => 250,
 	'request_allowance_extensions' => 0,
 	'stats'            => indexlane_invoke( 'empty_stats' ),
@@ -996,6 +1301,7 @@ $batch_session = array(
 	'checked_urls'     => array(),
 	'pending_checks'   => $pending_checks,
 );
+$batch_session['stats']['sources_processed']       = 1;
 $batch_session['stats']['content_items_processed'] = 1;
 $first_batch = indexlane_invoke( 'process_scan_batch', array( $batch_session ) );
 indexlane_assert_same( 5, $first_batch['stats']['http_requests'], 'One AJAX batch must make no more than five outbound requests.' );

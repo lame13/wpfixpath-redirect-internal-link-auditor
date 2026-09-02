@@ -79,10 +79,23 @@ if [[ "$(json_value "${invalid_nonce_response}" success)" != "false" ]]; then
 	exit 1
 fi
 
+empty_sources_response="${temporary_root}/empty-sources.json"
+curl -sS -b "${cookie_jar}" \
+	--data "action=indexlane_rila_start_scan" \
+	--data-urlencode "nonce=${nonce}" \
+	--data "source_types_present=1" \
+	"${base_url}/wp-admin/admin-ajax.php" -o "${empty_sources_response}"
+if [[ "$(json_value "${empty_sources_response}" success)" != "false" ]]; then
+	printf 'An empty stored-source selection was accepted.\n' >&2
+	exit 1
+fi
+
 response="${temporary_root}/start.json"
 curl -fsS -b "${cookie_jar}" \
 	--data "action=indexlane_rila_start_scan" \
 	--data-urlencode "nonce=${nonce}" \
+	--data "source_types_present=1" \
+	--data "source_types[]=content" \
 	--data "post_types[]=indexlane_e2e" \
 	--data "content_scope=all" \
 	--data "max_posts=1" \
@@ -163,6 +176,7 @@ if [[ "${status}" != "complete" || "${saw_limit}" != "true" ]]; then
 fi
 
 [[ "$(json_value "${final_response}" data.session.stats.content_items_processed)" == "40" ]]
+[[ "$(json_value "${final_response}" data.session.stats.sources_processed)" == "40" ]]
 [[ "$(json_value "${final_response}" data.session.stats.links_extracted)" == "283" ]]
 [[ "$(json_value "${final_response}" data.session.stats.links_audited)" == "282" ]]
 [[ "$(json_value "${final_response}" data.session.stats.skipped_external)" == "1" ]]
@@ -172,12 +186,12 @@ fi
 
 curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${page_html}"
 grep -Fq -- 'Content link coverage' "${page_html}"
-grep -Fq -- 'No incoming links detected in scanned content.' "${page_html}"
+grep -Fq -- 'No incoming links detected in selected sources.' "${page_html}"
 grep -Fq -- 'Showing 40 of 40 content items.' "${page_html}"
 
 filtered_page="${temporary_root}/coverage-filtered.html"
 curl -fsS -b "${cookie_jar}" "${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor&coverage_filter=attention" -o "${filtered_page}"
-grep -Fq -- 'Zero or one linking content item' "${filtered_page}"
+grep -Fq -- 'No links or links from one place' "${filtered_page}"
 grep -Fq -- 'Showing 30 of 40 content items.' "${filtered_page}"
 
 target_detail_url="$(php -r '
@@ -214,6 +228,7 @@ curl -fsS -b "${cookie_jar}" -D "${details_headers}" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${details_csv}"
 grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-details-' "${details_headers}"
 [[ "$(wc -l < "${details_csv}" | tr -d ' ')" == "283" ]]
+grep -Fq -- 'Source,"Source Surface","Source Scope","Source URL","Edit URL"' "${details_csv}"
 
 impact_csv="${temporary_root}/impact.csv"
 curl -fsS -b "${cookie_jar}" \
@@ -222,6 +237,7 @@ curl -fsS -b "${cookie_jar}" \
 	--data "indexlane_rila_action=export_impact" \
 	"${base_url}/wp-admin/tools.php?page=indexlane-redirect-internal-link-auditor" -o "${impact_csv}"
 [[ "$(wc -l < "${impact_csv}" | tr -d ' ')" == "122" ]]
+grep -Fq -- 'URL,Problem,"Times Linked","Editable Sources Affected","Affected Source Details","Source Edit URLs"' "${impact_csv}"
 
 coverage_csv="${temporary_root}/coverage.csv"
 coverage_headers="${temporary_root}/coverage.headers"
@@ -253,11 +269,11 @@ grep -Fqi -- 'content-type: application/json' "${baseline_headers}"
 grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-saved-scan-' "${baseline_headers}"
 php -r '
 	$data = json_decode(file_get_contents($argv[1]), true);
-	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 1 || $data["plugin_version"] !== "0.5.1") {
+	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 2 || $data["plugin_version"] !== "0.6.0") {
 		fwrite(STDERR, "Exported baseline metadata is invalid.\n");
 		exit(1);
 	}
-	if ($data["site_url"] !== $argv[2] || $data["scope"]["content_scope"] !== "all" || $data["scope"]["total_items"] !== 40) {
+	if ($data["site_url"] !== $argv[2] || $data["settings"]["source_types"] !== array("content") || $data["scope"]["content_scope"] !== "all" || $data["scope"]["total_sources"] !== 40 || $data["scope"]["content_items"] !== 40) {
 		fwrite(STDERR, "Exported baseline scope or site ownership is invalid.\n");
 		exit(1);
 	}

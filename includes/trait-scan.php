@@ -11,36 +11,13 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	/**
-	 * Get every public post type that can contain published content.
-	 *
-	 * @return array<string,string>
-	 */
-	private static function get_available_post_types(): array {
-		$labels  = array();
-		$objects = get_post_types( array( 'public' => true ), 'objects' );
-
-		foreach ( $objects as $post_type => $post_type_object ) {
-			if ( 'attachment' === $post_type ) {
-				continue;
-			}
-
-			$labels[ $post_type ] = isset( $post_type_object->labels->name )
-				? (string) $post_type_object->labels->name
-				: (string) $post_type;
-		}
-
-		natcasesort( $labels );
-
-		return $labels;
-	}
-
-	/**
 	 * Default scan settings.
 	 *
 	 * @return array<string,mixed>
 	 */
 	private static function default_settings(): array {
 		return array(
+			'source_types'     => self::get_default_source_types(),
 			'post_types'       => array_keys( self::get_available_post_types() ),
 			'old_domains'      => '',
 			'old_domain_hosts' => array(),
@@ -58,8 +35,21 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * @return array<string,mixed>
 	 */
 	private static function get_request_settings( array $post_data ): array {
-		$settings        = self::default_settings();
-		$available_types = array_keys( self::get_available_post_types() );
+		$settings          = self::default_settings();
+		$available_types   = array_keys( self::get_available_post_types() );
+		$available_sources = array_keys( self::get_available_source_types() );
+
+		if ( isset( $post_data['source_types'] ) && is_array( $post_data['source_types'] ) ) {
+			$source_types = array_filter( $post_data['source_types'], 'is_scalar' );
+			$source_types = array_map( 'sanitize_key', $source_types );
+			$source_types = array_values( array_unique( array_intersect( $source_types, $available_sources ) ) );
+		} elseif ( isset( $post_data['source_types_present'] ) ) {
+			$source_types = array();
+		} else {
+			// Preserve the pre-0.6 request contract for programmatic callers.
+			$source_types = in_array( 'content', $available_sources, true ) ? array( 'content' ) : array();
+		}
+		$settings['source_types'] = $source_types;
 
 		$post_types = isset( $post_data['post_types'] ) && is_array( $post_data['post_types'] ) ? $post_data['post_types'] : array();
 		$post_types = array_filter( $post_types, 'is_scalar' );
@@ -104,12 +94,14 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * @param string              $baseline_fingerprint Saved baseline fingerprint for verification.
 	 * @return array<string,mixed>
 	 */
-	private static function create_scan_session( array $settings, string $scan_mode = 'standard', string $baseline_id = '', string $baseline_fingerprint = '' ): array {
-		$snapshot = self::get_content_snapshot( $settings['post_types'] );
-		$total    = 'all' === $settings['content_scope']
-			? $snapshot['total_items']
-			: min( $snapshot['total_items'], (int) $settings['max_posts'] );
-		$now      = time();
+	private static function create_scan_session( array $settings, string $scan_mode = 'standard', string $baseline_id = '', string $baseline_fingerprint = '' ) {
+		$snapshot = self::snapshot_selected_source_providers( $settings );
+		if ( is_wp_error( $snapshot ) ) {
+			return $snapshot;
+		}
+
+		$total = (int) $snapshot['total_items'];
+		$now   = time();
 
 		return array(
 			'schema_version'     => self::SESSION_SCHEMA_VERSION,
@@ -123,13 +115,14 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			'baseline_fingerprint' => 'verification' === $scan_mode ? $baseline_fingerprint : '',
 			'settings'           => $settings,
 			'total_items'        => $total,
-			'snapshot_max_id'    => $snapshot['max_id'],
-			'cursor_before_id'   => $snapshot['max_id'] + 1,
-			'content_done'       => 0 === $total,
+			'source_provider_states' => $snapshot['states'],
+			'source_provider_index' => 0,
+			'sources_done'       => 0 === $total,
 			'request_limit'      => self::INITIAL_REQUEST_ALLOWANCE,
 			'request_allowance_extensions' => 0,
 			'stats'              => self::empty_stats(),
 			'content_items'      => array(),
+			'content_item_ids'   => array(),
 			'results'            => array(),
 			'checked_urls'       => array(),
 			'pending_checks'      => array(),
@@ -137,40 +130,14 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	}
 
 	/**
-	 * Count the selected published corpus and record its highest post ID.
-	 *
-	 * @param array<int,string> $post_types Post types.
-	 * @return array{total_items:int,max_id:int}
-	 */
-	private static function get_content_snapshot( array $post_types ): array {
-		$query = new WP_Query(
-			array(
-				'post_type'           => $post_types,
-				'post_status'         => 'publish',
-				'posts_per_page'      => 1,
-				'fields'              => 'ids',
-				'orderby'             => 'ID',
-				'order'               => 'DESC',
-				'ignore_sticky_posts' => true,
-				'no_found_rows'       => false,
-			)
-		);
-
-		return array(
-			'total_items' => max( 0, (int) $query->found_posts ),
-			'max_id'      => ! empty( $query->posts ) ? max( 0, (int) $query->posts[0] ) : 0,
-		);
-	}
-
-	/**
-	 * Process a bounded amount of content and HTTP work.
+	 * Process a bounded amount of stored-source and HTTP work.
 	 *
 	 * @param array<string,mixed> $session Scan session.
 	 * @return array<string,mixed>
 	 */
 	private static function process_scan_batch( array $session ): array {
 		$batch_request_start = (int) $session['stats']['http_requests'];
-		$batch_content_count = 0;
+		$batch_source_count  = 0;
 
 		while ( 'running' === $session['status'] ) {
 			if ( ! empty( $session['pending_checks'] ) ) {
@@ -187,33 +154,38 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 				continue;
 			}
 
-			if ( ! empty( $session['content_done'] ) ) {
+			if ( ! empty( $session['sources_done'] ) ) {
 				$session['status'] = 'complete';
 				break;
 			}
 
-			if ( $batch_content_count >= self::MAX_CONTENT_ITEMS_PER_BATCH ) {
+			if ( $batch_source_count >= self::MAX_SOURCE_ITEMS_PER_BATCH ) {
 				break;
 			}
 
-			$posts = self::get_next_scan_posts( $session, 1 );
-			if ( empty( $posts ) ) {
-				$session['content_done'] = true;
-				$session['total_items']  = (int) $session['stats']['content_items_processed'];
+			$next = self::get_next_scan_source( $session );
+			if ( is_wp_error( $next ) ) {
+				$session['status']          = 'failed';
+				$session['failure_message'] = $next->get_error_message();
+				break;
+			}
+
+			$session = $next['session'];
+			if ( null === $next['source'] ) {
+				$session['sources_done'] = true;
+				$session['total_items']  = (int) $session['stats']['sources_processed'];
 				continue;
 			}
 
-			$post                        = $posts[0];
-			$session['cursor_before_id'] = (int) $post->ID;
-			$session                     = self::process_content_item( $session, $post );
-			$batch_content_count++;
+			$session = self::process_source_item( $session, $next['source'] );
+			$batch_source_count++;
 
-			if ( (int) $session['stats']['content_items_processed'] >= (int) $session['total_items'] ) {
-				$session['content_done'] = true;
+			if ( (int) $session['stats']['sources_processed'] >= (int) $session['total_items'] ) {
+				$session['sources_done'] = true;
 			}
 		}
 
-		if ( 'running' === $session['status'] && ! empty( $session['content_done'] ) && empty( $session['pending_checks'] ) ) {
+		if ( 'running' === $session['status'] && ! empty( $session['sources_done'] ) && empty( $session['pending_checks'] ) ) {
 			$session['status'] = 'complete';
 		}
 
@@ -221,76 +193,31 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	}
 
 	/**
-	 * Fetch the next published posts below the persisted keyset cursor.
+	 * Extract and queue every relevant occurrence from one stored source.
 	 *
 	 * @param array<string,mixed> $session Scan session.
-	 * @param int                 $limit   Maximum posts.
-	 * @return array<int,WP_Post>
-	 */
-	private static function get_next_scan_posts( array $session, int $limit ): array {
-		add_filter( 'posts_where', array( __CLASS__, 'filter_scan_cursor_where' ), 10, 2 );
-		$query = new WP_Query(
-			array(
-				'post_type'                   => $session['settings']['post_types'],
-				'post_status'                 => 'publish',
-				'posts_per_page'              => max( 1, $limit ),
-				'orderby'                     => 'ID',
-				'order'                       => 'DESC',
-				'ignore_sticky_posts'         => true,
-				'no_found_rows'               => true,
-				'indexlane_rila_before_post_id' => (int) $session['cursor_before_id'],
-			)
-		);
-		remove_filter( 'posts_where', array( __CLASS__, 'filter_scan_cursor_where' ), 10 );
-
-		return is_array( $query->posts ) ? $query->posts : array();
-	}
-
-	/**
-	 * Apply the internal keyset cursor to scan-only WP_Query calls.
-	 *
-	 * @param string   $where SQL WHERE fragment.
-	 * @param WP_Query $query Query object.
-	 */
-	public static function filter_scan_cursor_where( string $where, $query ): string {
-		$before_id = absint( $query->get( 'indexlane_rila_before_post_id' ) );
-		if ( $before_id <= 0 ) {
-			return $where;
-		}
-
-		global $wpdb;
-		return $where . $wpdb->prepare( " AND {$wpdb->posts}.ID < %d", $before_id );
-	}
-
-	/**
-	 * Extract and queue every relevant occurrence from one content item.
-	 *
-	 * @param array<string,mixed> $session Scan session.
-	 * @param WP_Post             $post    Content item.
+	 * @param array<string,mixed> $source  Normalized stored source.
 	 * @return array<string,mixed>
 	 */
-	private static function process_content_item( array $session, $post ): array {
-		$session['stats']['content_items_processed']++;
-		$source_url = get_permalink( $post );
-		$source     = array(
-			'id'       => (int) $post->ID,
-			'title'    => get_the_title( $post ),
-			'type'     => self::get_post_type_label( (string) $post->post_type ),
-			'url'      => $source_url ? (string) $source_url : '',
-			'edit_url' => (string) get_edit_post_link( $post->ID, '' ),
-		);
-		$session['content_items'][] = $source;
-
-		if ( ! $source_url ) {
-			return $session;
+	private static function process_source_item( array $session, array $source ): array {
+		$session['stats']['sources_processed']++;
+		if ( is_array( $source['content_item'] ) ) {
+			$content_id = (int) $source['content_item']['id'];
+			if ( ! isset( $session['content_item_ids'][ $content_id ] ) ) {
+				$session['stats']['content_items_processed']++;
+				$session['content_items'][] = $source['content_item'];
+				$session['content_item_ids'][ $content_id ] = true;
+			}
 		}
 
-		$links = self::extract_links( (string) $post->post_content );
+		$links = self::extract_source_links( $source );
 		$session['stats']['links_extracted'] += count( $links );
+		$occurrence_source = $source;
+		unset( $occurrence_source['content'], $occurrence_source['links'], $occurrence_source['content_item'] );
 
 		$current_host = self::normalize_host( (string) wp_parse_url( home_url( '/' ), PHP_URL_HOST ) );
 		foreach ( $links as $link ) {
-			$prepared = self::prepare_link_occurrence( $link, $source, $session['settings'], $current_host );
+			$prepared = self::prepare_link_occurrence( $link, $occurrence_source, $session['settings'], $current_host );
 			if ( 'skip' === $prepared['type'] ) {
 				$session['stats']['skipped_external']++;
 				continue;
@@ -385,6 +312,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 */
 	private static function empty_stats(): array {
 		return array(
+			'sources_processed'            => 0,
 			'content_items_processed'      => 0,
 			'links_extracted'               => 0,
 			'links_audited'                 => 0,
@@ -396,9 +324,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	}
 
 	/**
-	 * Extract links from post content.
+	 * Extract links from stored HTML or block content.
 	 *
-	 * @param string $content Post content.
+	 * @param string $content Stored source content.
 	 * @return array<int,array{href:string,anchor:string}>
 	 */
 	private static function extract_links( string $content ): array {
@@ -485,7 +413,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * @return array<string,mixed>
 	 */
 	private static function prepare_link_occurrence( array $link, array $source, array $settings, string $current_host ): array {
-		$linked_url = self::normalize_link_url( $link['href'], (string) $source['url'] );
+		$linked_url = self::normalize_link_url( $link['href'], isset( $source['base_url'] ) ? (string) $source['base_url'] : (string) $source['url'] );
 
 		if ( '' === $linked_url ) {
 			return array(
@@ -920,8 +848,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 
 		return array(
 			'source_id'          => isset( $source['id'] ) ? max( 0, (int) $source['id'] ) : 0,
+			'source_key'         => isset( $source['key'] ) ? (string) $source['key'] : '',
 			'source_title'       => $source['title'],
 			'source_type'        => $source['type'],
+			'source_type_code'   => isset( $source['type_code'] ) ? (string) $source['type_code'] : 'content',
+			'source_context'     => isset( $source['context'] ) && 'shared' === $source['context'] ? 'shared' : 'contextual',
+			'source_content_id'  => isset( $source['content_id'] ) ? max( 0, (int) $source['content_id'] ) : 0,
 			'source_url'         => $source['url'],
 			'source_edit_url'    => $source['edit_url'],
 			'linked_url'         => $linked_url,
@@ -1136,7 +1068,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			'status'                      => (string) $session['status'],
 			'scan_mode'                   => isset( $session['scan_mode'] ) && 'verification' === $session['scan_mode'] ? 'verification' : 'standard',
 			'state_label'                 => self::scan_state_label( (string) $session['status'] ),
-			'message'                     => self::scan_state_message( (string) $session['status'] ),
+			'message'                     => 'failed' === $session['status'] && ! empty( $session['failure_message'] )
+				? (string) $session['failure_message']
+				: self::scan_state_message( (string) $session['status'] ),
 			'total_items'                 => max( 0, (int) $session['total_items'] ),
 			'request_limit'               => $request_limit,
 			'request_allowance_remaining' => max( 0, $request_limit - $requests ),
@@ -1158,6 +1092,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 				return __( 'Request limit reached', 'indexlane-redirect-internal-link-auditor' );
 			case 'complete':
 				return __( 'Complete', 'indexlane-redirect-internal-link-auditor' );
+			case 'failed':
+				return __( 'Scan stopped', 'indexlane-redirect-internal-link-auditor' );
 			default:
 				return __( 'Unavailable', 'indexlane-redirect-internal-link-auditor' );
 		}
@@ -1175,7 +1111,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			case 'limit_reached':
 				return __( 'Your progress is saved. Increase the request limit to continue.', 'indexlane-redirect-internal-link-auditor' );
 			case 'complete':
-				return __( 'All selected content and same-site URLs have been checked. Downloads use these exact results.', 'indexlane-redirect-internal-link-auditor' );
+				return __( 'All selected stored sources and same-site URLs have been checked. Downloads use these exact results.', 'indexlane-redirect-internal-link-auditor' );
+			case 'failed':
+				return __( 'The scan stopped before completion. Cancel it, resolve the link-source problem, and start again.', 'indexlane-redirect-internal-link-auditor' );
 			default:
 				return '';
 		}
@@ -1423,17 +1361,6 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 		}
 
 		return $text;
-	}
-
-	/**
-	 * Post type display label.
-	 */
-	private static function get_post_type_label( string $post_type ): string {
-		$post_type_object = get_post_type_object( $post_type );
-
-		return $post_type_object && isset( $post_type_object->labels->singular_name )
-			? (string) $post_type_object->labels->singular_name
-			: $post_type;
 	}
 
 	/**

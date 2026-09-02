@@ -248,7 +248,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			$settings = self::get_request_settings( $post_data );
 		}
 
-		if ( empty( $settings['post_types'] ) ) {
+		if ( empty( $settings['source_types'] ) ) {
+			wp_send_json_error( array( 'message' => __( 'Choose at least one place to check for links.', 'indexlane-redirect-internal-link-auditor' ) ), 400 );
+			return;
+		}
+
+		if ( in_array( 'content', $settings['source_types'], true ) && empty( $settings['post_types'] ) ) {
 			wp_send_json_error( array( 'message' => __( 'Select at least one public content type.', 'indexlane-redirect-internal-link-auditor' ) ), 400 );
 			return;
 		}
@@ -260,6 +265,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		}
 
 		$session = self::create_scan_session( $settings, $is_verification ? 'verification' : 'standard', $baseline_id, $fingerprint );
+		if ( is_wp_error( $session ) ) {
+			wp_send_json_error( array( 'message' => $session->get_error_message() ), 400 );
+			return;
+		}
 		if ( ! self::save_scan_session( $session ) ) {
 			wp_send_json_error( array( 'message' => __( 'WordPress could not save the scan session. Check the site cache or database and try again.', 'indexlane-redirect-internal-link-auditor' ) ), 500 );
 			return;
@@ -434,24 +443,50 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			<?php endif; ?>
 
 			<form id="indexlane-rila-scan-form" method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-form" <?php echo $has_session ? 'hidden' : ''; ?>>
+				<input type="hidden" name="source_types_present" value="1" />
 
 				<table class="form-table" role="presentation">
 					<tbody>
 						<tr>
+							<th scope="row"><?php esc_html_e( 'Where to check for links', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<td>
+								<fieldset class="indexlane-rila-fieldset" aria-describedby="indexlane-rila-source-help">
+									<legend class="screen-reader-text"><?php esc_html_e( 'Where to check for links', 'indexlane-redirect-internal-link-auditor' ); ?></legend>
+									<div class="indexlane-rila-source-options">
+										<?php foreach ( self::get_available_source_types() as $source_type => $source_definition ) : ?>
+											<label class="indexlane-rila-source-option">
+												<input
+													type="checkbox"
+													name="source_types[]"
+													value="<?php echo esc_attr( $source_type ); ?>"
+													<?php checked( in_array( $source_type, $settings['source_types'], true ) ); ?>
+												/>
+												<span><strong><?php echo esc_html( $source_definition['label'] ); ?></strong><span class="description"><?php echo esc_html( $source_definition['description'] ); ?></span></span>
+											</label>
+										<?php endforeach; ?>
+									</div>
+									<p id="indexlane-rila-source-help" class="description"><?php esc_html_e( 'Menus, templates, and other site-wide areas are checked once where you edit them. The scan reads saved WordPress data only; it does not run shortcodes or inspect rendered pages.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+								</fieldset>
+							</td>
+						</tr>
+						<tr data-indexlane-rila-content-setting>
 							<th scope="row"><?php esc_html_e( 'Content types', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<td>
-								<?php foreach ( self::get_available_post_types() as $post_type => $label ) : ?>
-									<label class="indexlane-rila-checkbox">
-										<input
-											type="checkbox"
-											name="post_types[]"
-											value="<?php echo esc_attr( $post_type ); ?>"
-											<?php checked( in_array( $post_type, $settings['post_types'], true ) ); ?>
-										/>
-										<?php echo esc_html( $label ); ?>
-									</label>
-								<?php endforeach; ?>
-								<p class="description"><?php esc_html_e( 'The scan checks published content in every selected type.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+								<fieldset class="indexlane-rila-fieldset" aria-describedby="indexlane-rila-content-types-help">
+									<legend class="screen-reader-text"><?php esc_html_e( 'Content types', 'indexlane-redirect-internal-link-auditor' ); ?></legend>
+									<?php foreach ( self::get_available_post_types() as $post_type => $label ) : ?>
+										<label class="indexlane-rila-checkbox">
+											<input
+												type="checkbox"
+												name="post_types[]"
+												value="<?php echo esc_attr( $post_type ); ?>"
+												<?php checked( in_array( $post_type, $settings['post_types'], true ) ); ?>
+											/>
+											<?php echo esc_html( $label ); ?>
+										</label>
+									<?php endforeach; ?>
+									<p id="indexlane-rila-content-types-help" class="description"><?php esc_html_e( 'Only used when Content is selected above.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+								</fieldset>
 							</td>
 						</tr>
 						<tr>
@@ -471,27 +506,30 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 								</p>
 							</td>
 						</tr>
-						<tr>
-							<th scope="row"><?php esc_html_e( 'Content scope', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						<tr data-indexlane-rila-content-setting>
+							<th scope="row"><?php esc_html_e( 'How much content', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<td>
-								<label class="indexlane-rila-choice">
-									<input type="radio" name="content_scope" value="all" <?php checked( 'all', $settings['content_scope'] ); ?> />
-									<?php esc_html_e( 'All published content', 'indexlane-redirect-internal-link-auditor' ); ?>
-								</label>
-								<label for="indexlane-rila-max-posts" class="indexlane-rila-choice">
-									<input type="radio" name="content_scope" value="limit" <?php checked( 'limit', $settings['content_scope'] ); ?> />
-									<?php esc_html_e( 'Newest', 'indexlane-redirect-internal-link-auditor' ); ?>
-									<input
-										id="indexlane-rila-max-posts"
-										type="number"
-										name="max_posts"
-										min="1"
-										max="<?php echo esc_attr( (string) self::MAX_NUMERIC_CONTENT_ITEMS ); ?>"
-										value="<?php echo esc_attr( (string) $settings['max_posts'] ); ?>"
-									/>
-									<?php esc_html_e( 'content items', 'indexlane-redirect-internal-link-auditor' ); ?>
-								</label>
-								<p class="description"><?php esc_html_e( 'You can pause a scan and continue it later.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+								<fieldset class="indexlane-rila-fieldset" aria-describedby="indexlane-rila-content-amount-help">
+									<legend class="screen-reader-text"><?php esc_html_e( 'How much content', 'indexlane-redirect-internal-link-auditor' ); ?></legend>
+									<label class="indexlane-rila-choice">
+										<input type="radio" name="content_scope" value="all" <?php checked( 'all', $settings['content_scope'] ); ?> />
+										<?php esc_html_e( 'All published content', 'indexlane-redirect-internal-link-auditor' ); ?>
+									</label>
+									<label for="indexlane-rila-max-posts" class="indexlane-rila-choice">
+										<input type="radio" name="content_scope" value="limit" <?php checked( 'limit', $settings['content_scope'] ); ?> />
+										<?php esc_html_e( 'Newest', 'indexlane-redirect-internal-link-auditor' ); ?>
+										<input
+											id="indexlane-rila-max-posts"
+											type="number"
+											name="max_posts"
+											min="1"
+											max="<?php echo esc_attr( (string) self::MAX_NUMERIC_CONTENT_ITEMS ); ?>"
+											value="<?php echo esc_attr( (string) $settings['max_posts'] ); ?>"
+										/>
+										<?php esc_html_e( 'content items', 'indexlane-redirect-internal-link-auditor' ); ?>
+									</label>
+									<p id="indexlane-rila-content-amount-help" class="description"><?php esc_html_e( 'This setting applies only to Content. Every other selected area is checked in full. You can pause and continue later.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+								</fieldset>
 							</td>
 						</tr>
 						<tr>
@@ -552,7 +590,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 
 			<div class="notice notice-info inline">
 				<p>
-					<?php esc_html_e( 'This scan checks links stored in the selected WordPress content. Old-site and staging links are flagged for review.', 'indexlane-redirect-internal-link-auditor' ); ?>
+					<?php esc_html_e( 'This scan reads only the saved WordPress areas selected above. It does not run shortcodes, scan custom fields or page-builder data, or crawl pages as visitors see them.', 'indexlane-redirect-internal-link-auditor' ); ?>
 				</p>
 			</div>
 
@@ -621,7 +659,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			<?php if ( is_array( $baseline ) ) : ?>
 				<dl class="indexlane-rila-baseline-metadata">
 					<div><dt><?php esc_html_e( 'Scanned on', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( self::baseline_scan_date_label( $baseline ) ); ?></dd></div>
-					<div><dt><?php esc_html_e( 'Content checked', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $baseline['stats']['content_items_processed'] ); ?></dd></div>
+					<div><dt><?php esc_html_e( 'Sources checked', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $baseline['stats']['sources_processed'] ); ?></dd></div>
 					<div><dt><?php esc_html_e( 'Links checked', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $baseline['stats']['links_audited'] ); ?></dd></div>
 					<div><dt><?php esc_html_e( 'URLs needing attention', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $issue_url_count ); ?></dd></div>
 				</dl>
@@ -636,7 +674,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 						<button type="submit" name="indexlane_rila_action" value="export_baseline_json" class="button"><?php esc_html_e( 'Download saved scan (.json)', 'indexlane-redirect-internal-link-auditor' ); ?></button>
 					</form>
 				</div>
-				<p class="description"><?php esc_html_e( 'The fix check repeats the saved content scope and link settings. Starting it replaces the current unsaved scan results.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+				<p class="description"><?php esc_html_e( 'The fix check repeats the saved source scope, content scope, and link settings. Starting it replaces the current unsaved scan results.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 
 				<details class="indexlane-rila-technical-details">
 					<summary><?php esc_html_e( 'Technical details', 'indexlane-redirect-internal-link-auditor' ); ?></summary>
@@ -690,7 +728,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		$has_session = is_array( $summary );
 		$stats       = $has_session ? $summary['stats'] : self::empty_stats();
 		$total       = $has_session ? max( 0, (int) $summary['total_items'] ) : 0;
-		$processed   = min( $total, (int) $stats['content_items_processed'] );
+		$processed   = min( $total, (int) $stats['sources_processed'] );
 		$request_limit = $has_session ? max( 0, (int) $summary['request_limit'] ) : 0;
 		$request_remaining = $has_session ? max( 0, (int) $summary['request_allowance_remaining'] ) : 0;
 		?>
@@ -723,7 +761,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			<p id="indexlane-rila-message" class="indexlane-rila-session-message" aria-live="polite"><?php echo $has_session ? esc_html( (string) $summary['message'] ) : ''; ?></p>
 
 			<div class="indexlane-rila-metrics">
-				<div><strong id="indexlane-rila-stat-content"><?php echo esc_html( (string) $stats['content_items_processed'] ); ?></strong><span><?php esc_html_e( 'Content checked', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
+				<div><strong id="indexlane-rila-stat-sources"><?php echo esc_html( (string) $stats['sources_processed'] ); ?></strong><span><?php esc_html_e( 'Sources checked', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
 				<div><strong id="indexlane-rila-stat-links"><?php echo esc_html( (string) $stats['links_extracted'] ); ?></strong><span><?php esc_html_e( 'Links found', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
 				<div><strong id="indexlane-rila-stat-destinations"><?php echo esc_html( (string) $stats['unique_destinations_checked'] ); ?></strong><span><?php esc_html_e( 'Unique URLs checked', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
 				<div><strong id="indexlane-rila-stat-issues"><?php echo esc_html( (string) $stats['actionable_issues'] ); ?></strong><span><?php esc_html_e( 'Links needing attention', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
@@ -757,11 +795,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		$baseline        = self::get_saved_baseline();
 		$is_verification = isset( $scan['scan_mode'] ) && 'verification' === $scan['scan_mode'];
 		$comparison      = $is_verification ? self::get_session_comparison( $scan ) : null;
-		$content_checked = (int) $stats['content_items_processed'];
+		$sources_checked = (int) $stats['sources_processed'];
 		$links_checked   = (int) $stats['links_audited'];
 		$problem_urls    = self::issue_url_count( $results );
-		/* translators: %d: number of content items checked */
-		$content_summary = sprintf( _n( '%d content item checked.', '%d content items checked.', $content_checked, 'indexlane-redirect-internal-link-auditor' ), $content_checked );
+		/* translators: %d: number of stored link sources checked */
+		$source_summary = sprintf( _n( '%d stored source checked.', '%d stored sources checked.', $sources_checked, 'indexlane-redirect-internal-link-auditor' ), $sources_checked );
 		/* translators: %d: number of links checked */
 		$link_summary = sprintf( _n( '%d link checked.', '%d links checked.', $links_checked, 'indexlane-redirect-internal-link-auditor' ), $links_checked );
 		/* translators: %d: number of URLs needing attention */
@@ -770,11 +808,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		<div id="indexlane-rila-results" class="indexlane-rila-results">
 			<h2><?php esc_html_e( 'Scan results', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 
-			<p class="indexlane-rila-results-summary"><?php echo esc_html( $content_summary . ' ' . $link_summary . ' ' . $url_summary ); ?></p>
+			<p class="indexlane-rila-results-summary"><?php echo esc_html( $source_summary . ' ' . $link_summary . ' ' . $url_summary ); ?></p>
 
 			<details class="indexlane-rila-technical-details indexlane-rila-results-technical">
 				<summary><?php esc_html_e( 'Technical details', 'indexlane-redirect-internal-link-auditor' ); ?></summary>
 				<dl class="indexlane-rila-technical-metadata">
+					<div><dt><?php esc_html_e( 'Published content checked', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $stats['content_items_processed'] ); ?></dd></div>
 					<div><dt><?php esc_html_e( 'Links found', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $stats['links_extracted'] ); ?></dd></div>
 					<div><dt><?php esc_html_e( 'External links skipped', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $stats['skipped_external'] ); ?></dd></div>
 					<div><dt><?php esc_html_e( 'Unique URLs checked', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $stats['unique_destinations_checked'] ); ?></dd></div>
@@ -825,24 +864,24 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 				<?php endif; ?>
 			<?php endif; ?>
 
-			<?php self::render_content_link_coverage( $coverage_rows, $coverage_filter, $coverage_target ); ?>
+			<?php self::render_content_link_coverage( $coverage_rows, $coverage_filter, $coverage_target, isset( $scan['settings']['source_types'] ) && is_array( $scan['settings']['source_types'] ) ? $scan['settings']['source_types'] : array( 'content' ) ); ?>
 
 			<?php if ( empty( $results ) ) : ?>
-				<p><?php esc_html_e( 'No internal, old-site, staging, or development links were found in the scanned content.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+				<p><?php esc_html_e( 'No internal, old-site, staging, or development links were found in the selected stored sources.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 			<?php else : ?>
 				<?php self::render_destination_impact( $impact_rows ); ?>
 
 				<h2><?php esc_html_e( 'Link details', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 				<p class="description">
-					<?php esc_html_e( 'Use this full list when you need the exact content item, linked URL, link text, and HTTP result.', 'indexlane-redirect-internal-link-auditor' ); ?>
+					<?php esc_html_e( 'Use this full list when you need the exact editable source, linked URL, link text, and HTTP result.', 'indexlane-redirect-internal-link-auditor' ); ?>
 				</p>
 				<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Link details', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
 				<table class="widefat striped indexlane-rila-occurrence-table">
 					<thead>
 						<tr>
-							<th><?php esc_html_e( 'Content item', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Content type', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Content URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th><?php esc_html_e( 'Source', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th><?php esc_html_e( 'Surface', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th><?php esc_html_e( 'Scope', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<th><?php esc_html_e( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<th><?php esc_html_e( 'HTTP status', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<th><?php esc_html_e( 'Redirects', 'indexlane-redirect-internal-link-auditor' ); ?></th>
@@ -861,9 +900,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 									<?php else : ?>
 										<?php echo esc_html( $row['source_title'] ); ?>
 									<?php endif; ?>
+									<?php if ( ! empty( $row['source_url'] ) ) : ?>
+										<a class="indexlane-rila-target-url" href="<?php echo esc_url( $row['source_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['source_url'] ); ?></a>
+									<?php endif; ?>
 								</td>
 								<td><?php echo esc_html( $row['source_type'] ); ?></td>
-								<td><a href="<?php echo esc_url( $row['source_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['source_url'] ); ?></a></td>
+								<td><?php echo esc_html( self::source_context_label( isset( $row['source_context'] ) ? (string) $row['source_context'] : 'contextual' ) ); ?></td>
 								<td><a href="<?php echo esc_url( $row['linked_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['linked_url'] ); ?></a></td>
 								<td><?php echo esc_html( $row['http_status'] ); ?></td>
 								<td><?php echo esc_html( (string) $row['redirect_count'] ); ?></td>
@@ -985,10 +1027,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		$old_count = is_array( $old ) ? max( 0, (int) $old['affected_source_count'] ) : null;
 		$new_count = is_array( $new ) ? max( 0, (int) $new['affected_source_count'] ) : null;
 		$missing   = __( 'Not present', 'indexlane-redirect-internal-link-auditor' );
-		/* translators: %d: number of content items containing the URL */
-		$old_label = null === $old_count ? $missing : sprintf( _n( '%d content item', '%d content items', $old_count, 'indexlane-redirect-internal-link-auditor' ), $old_count );
-		/* translators: %d: number of content items containing the URL */
-		$new_label = null === $new_count ? $missing : sprintf( _n( '%d content item', '%d content items', $new_count, 'indexlane-redirect-internal-link-auditor' ), $new_count );
+		/* translators: %d: number of editable sources containing the URL */
+		$old_label = null === $old_count ? $missing : sprintf( _n( '%d editable source', '%d editable sources', $old_count, 'indexlane-redirect-internal-link-auditor' ), $old_count );
+		/* translators: %d: number of editable sources containing the URL */
+		$new_label = null === $new_count ? $missing : sprintf( _n( '%d editable source', '%d editable sources', $new_count, 'indexlane-redirect-internal-link-auditor' ), $new_count );
 		?>
 		<span class="indexlane-rila-comparison-source-count"><span><?php esc_html_e( 'Saved scan', 'indexlane-redirect-internal-link-auditor' ); ?></span><?php echo esc_html( $old_label ); ?></span>
 		<span class="indexlane-rila-comparison-source-count"><span><?php esc_html_e( 'Latest scan', 'indexlane-redirect-internal-link-auditor' ); ?></span><?php echo esc_html( $new_label ); ?></span>
@@ -1027,8 +1069,6 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 					<?php
 					/* translators: %d: number of times a URL or content item is linked */
 					$link_count_label = sprintf( _n( '%d time linked', '%d times linked', (int) $row['occurrences'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['occurrences'] );
-					/* translators: %d: number of content items containing a URL */
-					$content_count_label = sprintf( _n( '%d content item affected', '%d content items affected', (int) $row['affected_sources'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['affected_sources'] );
 					?>
 					<tr>
 						<td>
@@ -1039,7 +1079,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 							<?php endif; ?>
 						</td>
 						<td><strong><?php echo esc_html( $row['impact'] ); ?></strong><span class="indexlane-rila-cell-note"><?php echo esc_html( $row['result'] ); ?></span></td>
-						<td><strong><?php echo esc_html( $link_count_label ); ?></strong><span class="indexlane-rila-cell-note"><?php echo esc_html( $content_count_label ); ?></span></td>
+						<td><?php self::render_impact_source_details( $row, $link_count_label ); ?></td>
 						<td>
 							<details class="indexlane-rila-row-details">
 								<summary><?php esc_html_e( 'Technical details', 'indexlane-redirect-internal-link-auditor' ); ?></summary>
@@ -1060,13 +1100,70 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 	}
 
 	/**
+	 * Render the exact editable sources behind one grouped problem URL.
+	 *
+	 * @param array<string,mixed> $row              Impact row.
+	 * @param string              $link_count_label Total occurrence label.
+	 */
+	private static function render_impact_source_details( array $row, string $link_count_label ): void {
+		$sources = isset( $row['affected_source_details'] ) && is_array( $row['affected_source_details'] ) ? $row['affected_source_details'] : array();
+		if ( empty( $sources ) ) {
+			echo '<strong>' . esc_html( $link_count_label ) . '</strong>';
+			return;
+		}
+
+		if ( 1 === count( $sources ) ) {
+			$source = $sources[0];
+			?>
+			<strong>
+				<?php if ( '' !== $source['edit_url'] ) : ?>
+					<a href="<?php echo esc_url( $source['edit_url'] ); ?>"><?php echo esc_html( $source['title'] ); ?></a>
+				<?php else : ?>
+					<?php echo esc_html( $source['title'] ); ?>
+				<?php endif; ?>
+			</strong>
+			<span class="indexlane-rila-cell-note"><?php echo esc_html( $source['type'] . ' · ' . self::source_context_label( $source['context'] ) ); ?></span>
+			<span class="indexlane-rila-cell-note"><?php echo esc_html( $link_count_label ); ?></span>
+			<?php
+			return;
+		}
+
+		/* translators: %d: number of editable sources containing a URL */
+		$source_count_label = sprintf( _n( '%d editable source affected', '%d editable sources affected', count( $sources ), 'indexlane-redirect-internal-link-auditor' ), count( $sources ) );
+		?>
+		<strong><?php echo esc_html( $source_count_label ); ?></strong>
+		<span class="indexlane-rila-cell-note"><?php echo esc_html( $link_count_label ); ?></span>
+		<details class="indexlane-rila-row-details indexlane-rila-source-details">
+			<summary><?php esc_html_e( 'View affected sources', 'indexlane-redirect-internal-link-auditor' ); ?></summary>
+			<ul>
+				<?php foreach ( $sources as $source ) : ?>
+					<li>
+						<?php if ( '' !== $source['edit_url'] ) : ?>
+							<a href="<?php echo esc_url( $source['edit_url'] ); ?>"><?php echo esc_html( $source['title'] ); ?></a>
+						<?php else : ?>
+							<?php echo esc_html( $source['title'] ); ?>
+						<?php endif; ?>
+						<?php
+						/* translators: %d: number of link occurrences in one editable source */
+						$source_occurrences = sprintf( _n( '%d link', '%d links', (int) $source['occurrences'], 'indexlane-redirect-internal-link-auditor' ), (int) $source['occurrences'] );
+						?>
+						<span><?php echo esc_html( $source['type'] . ' · ' . self::source_context_label( $source['context'] ) . ' · ' . $source_occurrences ); ?></span>
+					</li>
+				<?php endforeach; ?>
+			</ul>
+		</details>
+		<?php
+	}
+
+	/**
 	 * Render the destination-oriented coverage report for the scanned corpus.
 	 *
 	 * @param array<int,array<string,mixed>> $coverage_rows Coverage rows.
 	 * @param string                         $filter        Coverage filter.
 	 * @param int                            $target_id     Selected target detail ID.
+	 * @param array<int,string>              $source_types Selected source provider IDs.
 	 */
-	private static function render_content_link_coverage( array $coverage_rows, string $filter, int $target_id ): void {
+	private static function render_content_link_coverage( array $coverage_rows, string $filter, int $target_id, array $source_types ): void {
 		$filtered_rows = array_values(
 			array_filter(
 				$coverage_rows,
@@ -1086,10 +1183,18 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		<section class="indexlane-rila-coverage" aria-labelledby="indexlane-rila-coverage-heading">
 			<h2 id="indexlane-rila-coverage-heading"><?php esc_html_e( 'Content link coverage', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 			<p class="description">
-				<?php esc_html_e( 'See which scanned content items receive links and where those links come from. Redirected links count toward the final WordPress URL.', 'indexlane-redirect-internal-link-auditor' ); ?>
+				<?php esc_html_e( 'See which posts, pages, and other content receive links from individual content or site-wide areas. Redirected links count toward the final WordPress URL.', 'indexlane-redirect-internal-link-auditor' ); ?>
 			</p>
 			<p class="indexlane-rila-evidence-scope">
-				<?php esc_html_e( 'Coverage includes links found in scanned post content. It does not include menus, templates, widgets, shortcode output, or rendered page-builder content.', 'indexlane-redirect-internal-link-auditor' ); ?>
+				<?php
+				echo esc_html(
+					sprintf(
+						/* translators: %s: comma-separated selected stored source labels */
+						__( 'Checked areas: %s. This report uses saved WordPress data only; it does not include shortcode output, custom fields, page-builder data, or rendered pages.', 'indexlane-redirect-internal-link-auditor' ),
+						implode( ', ', self::source_type_labels( $source_types ) )
+					)
+				);
+				?>
 			</p>
 
 			<?php if ( is_array( $target_detail ) ) : ?>
@@ -1109,7 +1214,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 				</label>
 				<select id="indexlane-rila-coverage-filter" name="coverage_filter">
 					<option value="all" <?php selected( 'all', $filter ); ?>><?php esc_html_e( 'All scanned content', 'indexlane-redirect-internal-link-auditor' ); ?></option>
-					<option value="attention" <?php selected( 'attention', $filter ); ?>><?php esc_html_e( 'Zero or one linking content item', 'indexlane-redirect-internal-link-auditor' ); ?></option>
+					<option value="attention" <?php selected( 'attention', $filter ); ?>><?php esc_html_e( 'No links or links from one place', 'indexlane-redirect-internal-link-auditor' ); ?></option>
 				</select>
 				<button type="submit" class="button"><?php esc_html_e( 'Apply filter', 'indexlane-redirect-internal-link-auditor' ); ?></button>
 				<span class="description">
@@ -1145,10 +1250,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 					<tbody>
 						<?php foreach ( $filtered_rows as $row ) : ?>
 							<?php
-							/* translators: %d: number of times a URL or content item is linked */
-							$link_count_label = sprintf( _n( '%d time linked', '%d times linked', (int) $row['incoming_occurrences'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['incoming_occurrences'] );
-							/* translators: %d: number of content items containing links to the target */
-							$source_count_label = sprintf( _n( 'from %d content item', 'from %d content items', (int) $row['linking_source_count'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['linking_source_count'] );
+							/* translators: %d: number of contextual incoming link occurrences */
+							$contextual_label = sprintf( _n( '%d link from content', '%d links from content', (int) $row['contextual_incoming'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['contextual_incoming'] );
+							/* translators: %d: number of navigation or shared incoming link occurrences */
+							$shared_label = sprintf( _n( '%d link from site-wide areas', '%d links from site-wide areas', (int) $row['shared_incoming'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['shared_incoming'] );
+							/* translators: %d: number of editable sources containing links to the target */
+							$source_count_label = sprintf( _n( 'stored in %d editable place', 'stored in %d editable places', (int) $row['editable_source_count'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['editable_source_count'] );
 							?>
 							<tr>
 								<td class="indexlane-rila-target-cell">
@@ -1167,7 +1274,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 									<?php endif; ?>
 								</td>
 								<td><span class="indexlane-rila-coverage-status is-<?php echo esc_attr( $row['status_code'] ); ?>"><?php echo esc_html( $row['status'] ); ?></span></td>
-								<td><strong><?php echo esc_html( $link_count_label ); ?></strong><span class="indexlane-rila-cell-note"><?php echo esc_html( $source_count_label ); ?></span></td>
+								<td><strong><?php echo esc_html( $contextual_label ); ?></strong><span class="indexlane-rila-cell-note"><?php echo esc_html( $shared_label ); ?></span><span class="indexlane-rila-cell-note"><?php echo esc_html( $source_count_label ); ?></span></td>
 								<td>
 									<a class="button button-small" href="<?php echo esc_url( self::coverage_report_url( $filter, (int) $row['target_id'] ) . '#indexlane-rila-target-detail' ); ?>">
 										<?php esc_html_e( 'View link details', 'indexlane-redirect-internal-link-auditor' ); ?>
@@ -1175,6 +1282,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 									<details class="indexlane-rila-row-details">
 										<summary><?php esc_html_e( 'Technical details', 'indexlane-redirect-internal-link-auditor' ); ?></summary>
 										<dl class="indexlane-rila-row-detail-list">
+											<div><dt><?php esc_html_e( 'All incoming links', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $row['incoming_occurrences'] ); ?></dd></div>
+											<div><dt><?php esc_html_e( 'Individual content sources', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $row['contextual_source_count'] ); ?></dd></div>
+											<div><dt><?php esc_html_e( 'Site-wide sources', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $row['shared_source_count'] ); ?></dd></div>
 											<div><dt><?php esc_html_e( 'Links from this content', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $row['outgoing_internal_occurrences'] ); ?></dd></div>
 											<div><dt><?php esc_html_e( 'Unique URLs linked', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $row['distinct_internal_destinations'] ); ?></dd></div>
 											<div><dt><?php esc_html_e( 'Link text', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php self::render_anchor_text_variants( $row['anchor_text_variants'] ); ?></dd></div>
@@ -1225,8 +1335,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			<p><span class="indexlane-rila-coverage-status is-<?php echo esc_attr( $target['status_code'] ); ?>"><?php echo esc_html( $target['status'] ); ?></span></p>
 
 			<?php if ( empty( $target['incoming_details'] ) ) : ?>
-				<p><?php esc_html_e( 'No incoming links detected in scanned content.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
-				<p class="description"><?php esc_html_e( 'This is limited to links found in the scanned content fields; other sitewide link sources may exist.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+				<p><?php esc_html_e( 'No incoming links detected in selected sources.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+				<p class="description"><?php esc_html_e( 'This covers only the saved WordPress areas selected for this scan. Shortcode output, custom fields, page-builder data, and rendered pages may still contain links.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 		</section>
 				<?php return; ?>
 			<?php endif; ?>
@@ -1235,7 +1345,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 				<table class="widefat striped indexlane-rila-target-detail-table">
 					<thead>
 						<tr>
-							<th scope="col"><?php esc_html_e( 'Content item', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th scope="col"><?php esc_html_e( 'Where to edit', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Link text', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Connection', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 							<th scope="col"><?php esc_html_e( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
@@ -1252,6 +1362,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 									<?php else : ?>
 										<?php echo esc_html( $detail['source_title'] ); ?>
 									<?php endif; ?>
+									<span class="indexlane-rila-cell-note"><?php echo esc_html( $detail['source_type'] . ' · ' . self::source_context_label( $detail['source_context'] ) ); ?></span>
 									<?php if ( '' !== $detail['source_url'] ) : ?>
 										<a class="indexlane-rila-target-url" href="<?php echo esc_url( $detail['source_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $detail['source_url'] ); ?></a>
 									<?php endif; ?>

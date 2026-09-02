@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.6.0 - 2026-09-02
+
+- Added independently selectable link-source adapters for normal content, classic menus, Navigation entities, synced patterns, block templates, template parts, and assigned block widgets.
+- Retained each occurrence's stable source identity, source surface, edit and source URLs, link text, and individual-content or site-wide scope alongside the existing HTTP and redirect evidence.
+- Expanded content coverage, problem-URL reports, details, comparisons, and CSV exports with contextual and site-wide counts plus exact editable locations.
+- Added the public `indexlane_rila_source_providers` filter for bounded third-party stored-source adapters without executing shortcodes, scanning arbitrary metadata, or crawling rendered pages.
+- Upgraded resumable session and portable saved-scan schemas with strict legacy migration, provider availability checks, five-source batches, and a 100,000-source session limit.
+- Reworked the scan form and result wording for non-technical administrators, regenerated the WordPress.org screenshots, and expanded behavioral, integration, translation, and authenticated AJAX coverage.
+
 ## 0.5.1 - 2026-08-31
 
 - Rewrote the administrator workflow around saved scans, fix checks, results, URLs, link details, and downloads without changing the plugin name or read-only behavior.

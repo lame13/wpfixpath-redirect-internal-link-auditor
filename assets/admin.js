@@ -23,8 +23,10 @@
 	const requestError = document.getElementById( 'indexlane-rila-request-error' );
 	const requestLimit = document.getElementById( 'indexlane-rila-request-limit' );
 	const requestsRemaining = document.getElementById( 'indexlane-rila-requests-remaining' );
+	const contentSource = form ? form.querySelector( 'input[name="source_types[]"][value="content"]' ) : null;
+	const contentSettings = form ? Array.from( form.querySelectorAll( '[data-indexlane-rila-content-setting]' ) ) : [];
 	const metrics = {
-		content_items_processed: document.getElementById( 'indexlane-rila-stat-content' ),
+		sources_processed: document.getElementById( 'indexlane-rila-stat-sources' ),
 		links_extracted: document.getElementById( 'indexlane-rila-stat-links' ),
 		unique_destinations_checked: document.getElementById( 'indexlane-rila-stat-destinations' ),
 		http_requests: document.getElementById( 'indexlane-rila-stat-requests' ),
@@ -44,6 +46,16 @@
 		}
 	}
 
+	function updateContentSettings( formLocked ) {
+		const contentSelected = ! contentSource || contentSource.checked;
+		contentSettings.forEach( function ( setting ) {
+			setting.classList.toggle( 'is-unavailable', ! contentSelected );
+			Array.from( setting.querySelectorAll( 'input, select, textarea, button' ) ).forEach( function ( control ) {
+				control.disabled = formLocked || ! contentSelected;
+			} );
+		} );
+	}
+
 	function render() {
 		const hasSession = !! session;
 		const active = hasSession && [ 'running', 'paused', 'limit_reached' ].includes( session.status );
@@ -60,6 +72,7 @@
 			Array.from( form.elements ).forEach( function ( control ) {
 				control.disabled = active || requestInFlight;
 			} );
+			updateContentSettings( active || requestInFlight );
 		}
 		if ( verificationButton ) {
 			verificationButton.disabled = active || requestInFlight;
@@ -74,7 +87,7 @@
 		stateMessage.textContent = clientMessage || session.message;
 
 		const total = Math.max( 0, Number( session.total_items ) || 0 );
-		const processed = Math.min( total, Number( session.stats.content_items_processed ) || 0 );
+		const processed = Math.min( total, Number( session.stats.sources_processed ) || 0 );
 		progress.max = Math.max( 1, total );
 		progress.value = processed;
 
@@ -231,6 +244,9 @@
 			event.preventDefault();
 			startScan( form, false );
 		} );
+		if ( contentSource ) {
+			contentSource.addEventListener( 'change', render );
+		}
 
 		const limitInput = document.getElementById( 'indexlane-rila-max-posts' );
 		if ( limitInput ) {

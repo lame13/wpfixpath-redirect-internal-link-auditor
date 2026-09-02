@@ -2,8 +2,8 @@
 /**
  * Plugin Name: IndexLane Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
- * Description: Audit redirects, broken links, and content link coverage inside WordPress.
- * Version: 0.5.1
+ * Description: Audit redirects, broken links, and source-aware internal link coverage inside WordPress.
+ * Version: 0.6.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -21,6 +21,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	require_once __DIR__ . '/includes/trait-admin.php';
+	require_once __DIR__ . '/includes/trait-source-providers.php';
 	require_once __DIR__ . '/includes/trait-scan.php';
 	require_once __DIR__ . '/includes/trait-reports.php';
 	require_once __DIR__ . '/includes/trait-baselines.php';
@@ -30,19 +31,20 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	 */
 	final class IndexLane_Redirect_Internal_Link_Auditor {
 		use IndexLane_Redirect_Internal_Link_Auditor_Admin;
+		use IndexLane_Redirect_Internal_Link_Auditor_Source_Providers;
 		use IndexLane_Redirect_Internal_Link_Auditor_Scan;
 		use IndexLane_Redirect_Internal_Link_Auditor_Reports;
 		use IndexLane_Redirect_Internal_Link_Auditor_Baselines;
 
 		private const PLUGIN_FILE                     = __FILE__;
-		private const VERSION                         = '0.5.1';
+		private const VERSION                         = '0.6.0';
 		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY                      = 'manage_options';
 		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';
 		private const NONCE_NAME                      = 'indexlane_rila_nonce';
-		private const SESSION_SCHEMA_VERSION          = 3;
+		private const SESSION_SCHEMA_VERSION          = 4;
 		private const BASELINE_FORMAT                 = 'indexlane-rila-baseline';
-		private const BASELINE_SCHEMA_VERSION         = 1;
+		private const BASELINE_SCHEMA_VERSION         = 2;
 		private const BASELINE_USER_OPTION            = 'indexlane_rila_baseline';
 		private const MAX_BASELINE_FILE_SIZE          = 20971520;
 		private const MAX_BASELINE_CONTENT_ITEMS      = 100000;
@@ -52,7 +54,8 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		private const INITIAL_REQUEST_ALLOWANCE       = 250;
 		private const REQUEST_ALLOWANCE_INCREMENT     = 250;
 		private const MAX_HTTP_REQUESTS_PER_BATCH     = 5;
-		private const MAX_CONTENT_ITEMS_PER_BATCH     = 5;
+		private const MAX_SOURCE_ITEMS_PER_BATCH      = 5;
+		private const MAX_SESSION_SOURCE_ITEMS        = 100000;
 		private const MAX_NUMERIC_CONTENT_ITEMS       = 10000;
 		private const RESPONSE_SIZE_LIMIT              = 4096;
 

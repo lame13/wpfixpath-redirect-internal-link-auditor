@@ -44,6 +44,37 @@ function indexlane_wp_assert_same( $expected, $actual, string $message ): void {
 	}
 }
 
+/**
+ * Drain one finite built-in provider snapshot without starting HTTP work.
+ *
+ * @param string              $snapshot_method Snapshot callback method.
+ * @param string              $next_method     Next-source callback method.
+ * @param array<string,mixed> $settings        Scan settings.
+ * @return array<int,array<string,mixed>>
+ */
+function indexlane_wp_provider_sources( string $snapshot_method, string $next_method, array $settings ): array {
+	$snapshot = indexlane_wp_invoke( $snapshot_method, array( $settings ) );
+	if ( is_wp_error( $snapshot ) ) {
+		throw new RuntimeException( $snapshot->get_error_message() );
+	}
+
+	$sources = array();
+	$cursor  = $snapshot['cursor'];
+	$limit   = (int) $snapshot['total_items'] + 10;
+	for ( $index = 0; $index < $limit; $index++ ) {
+		$next   = indexlane_wp_invoke( $next_method, array( $cursor, $settings ) );
+		$cursor = $next['cursor'];
+		if ( is_array( $next['source'] ) ) {
+			$sources[] = $next['source'];
+		}
+		if ( $next['done'] ) {
+			break;
+		}
+	}
+
+	return $sources;
+}
+
 if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	throw new RuntimeException( 'The plugin class is not loaded.' );
 }
@@ -105,6 +136,14 @@ $fixture_ids = array();
 $http_calls  = array();
 $home        = untrailingslashit( home_url( '/' ) );
 $coverage_target_url = '';
+$shared_post_ids    = array();
+$template_fixture_keys = array();
+$classic_menu_id    = 0;
+$widget_number      = 0;
+$registered_sidebar = false;
+$expected_shared_occurrences = 0;
+$widget_block_before = get_option( 'widget_block', false );
+$sidebars_before     = get_option( 'sidebars_widgets', false );
 $contents    = array(
 	'<a href="' . esc_url( $home . '/fixture-redirect' ) . '">Redirect again</a>',
 	'<a href="' . esc_url( $home . '/fixture-ok' ) . '">Healthy</a>',
@@ -190,6 +229,225 @@ try {
 		}
 	}
 
+	$available_sources = indexlane_wp_invoke( 'get_available_source_types' );
+	indexlane_wp_assert_same(
+		array(),
+		array_values( array_diff( array( 'content', 'menu', 'navigation', 'pattern', 'template', 'template_part', 'widget' ), array_keys( $available_sources ) ) ),
+		'Every planned WordPress-native source adapter must be registered.'
+	);
+
+	$adapter_settings = array(
+		'source_types'     => array_keys( $available_sources ),
+		'post_types'       => array( $post_type ),
+		'old_domains'      => '',
+		'old_domain_hosts' => array(),
+		'content_scope'    => 'all',
+		'max_posts'        => 100,
+		'timeout'          => 2.0,
+		'max_redirects'    => 5,
+	);
+
+	$classic_menu_id = wp_create_nav_menu( 'IndexLane integration ' . wp_generate_uuid4() );
+	if ( is_wp_error( $classic_menu_id ) ) {
+		throw new RuntimeException( $classic_menu_id->get_error_message() );
+	}
+	$classic_menu_id = (int) $classic_menu_id;
+	$menu_item_id    = wp_update_nav_menu_item(
+		$classic_menu_id,
+		0,
+		array(
+			'menu-item-title'  => 'Shared menu target',
+			'menu-item-url'    => $coverage_target_url,
+			'menu-item-status' => 'publish',
+			'menu-item-type'   => 'custom',
+		)
+	);
+	if ( is_wp_error( $menu_item_id ) ) {
+		throw new RuntimeException( $menu_item_id->get_error_message() );
+	}
+	$menu_sources = indexlane_wp_provider_sources( 'snapshot_classic_menu_provider', 'next_classic_menu_provider_source', $adapter_settings );
+	$menu_by_key  = array_column( $menu_sources, null, 'key' );
+	indexlane_wp_assert_same( true, isset( $menu_by_key[ 'menu:' . $classic_menu_id ] ), 'Classic menus must be exposed as exact shared sources.' );
+	indexlane_wp_assert_same( 1, count( $menu_by_key[ 'menu:' . $classic_menu_id ]['links'] ), 'Classic menu sources must retain their exact stored link.' );
+	indexlane_wp_assert_same( 'Shared menu target', $menu_by_key[ 'menu:' . $classic_menu_id ]['links'][0]['anchor'], 'Classic menu item labels must become exact anchor evidence.' );
+	$expected_shared_occurrences++;
+
+	if ( post_type_exists( 'wp_navigation' ) ) {
+		$navigation_id = wp_insert_post(
+			array(
+				'post_type'    => 'wp_navigation',
+				'post_status'  => 'publish',
+				'post_title'   => 'IndexLane integration navigation',
+				'post_content' => wp_slash( '<!-- wp:navigation-link {"label":"Navigation target","url":"' . esc_url_raw( $coverage_target_url ) . '","kind":"custom"} /-->' ),
+			),
+			true
+		);
+		if ( is_wp_error( $navigation_id ) ) {
+			throw new RuntimeException( $navigation_id->get_error_message() );
+		}
+		$shared_post_ids[] = (int) $navigation_id;
+		$navigation_sources = indexlane_wp_provider_sources( 'snapshot_navigation_provider', 'next_navigation_provider_source', $adapter_settings );
+		$navigation_by_key  = array_column( $navigation_sources, null, 'key' );
+		$navigation_key     = 'navigation:' . (int) $navigation_id;
+		indexlane_wp_assert_same( true, isset( $navigation_by_key[ $navigation_key ] ), 'Navigation entities must be exposed as exact shared sources.' );
+		$normalized_navigation = indexlane_wp_invoke(
+			'normalize_source_record',
+			array( $navigation_by_key[ $navigation_key ], 'navigation', array( 'label' => 'Navigation', 'context' => 'shared' ) )
+		);
+		$navigation_links = indexlane_wp_invoke( 'extract_source_links', array( $normalized_navigation ) );
+		indexlane_wp_assert_same( 1, count( $navigation_links ), 'Navigation entities must retain each exact stored link occurrence.' );
+		indexlane_wp_assert_same( $coverage_target_url, $navigation_links[0]['href'], 'Self-closing Navigation links must be extracted from stored block attributes.' );
+		$expected_shared_occurrences++;
+	}
+
+	if ( post_type_exists( 'wp_block' ) ) {
+		$pattern_id = wp_insert_post(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'IndexLane integration pattern',
+				'post_content' => '<p><a href="' . esc_url( $coverage_target_url ) . '">Pattern target</a></p>',
+			),
+			true
+		);
+		$unsynced_pattern_id = wp_insert_post(
+			array(
+				'post_type'    => 'wp_block',
+				'post_status'  => 'publish',
+				'post_title'   => 'IndexLane unsynced integration pattern',
+				'post_content' => '<p><a href="' . esc_url( $coverage_target_url ) . '">Unsynced target</a></p>',
+				'meta_input'   => array( 'wp_pattern_sync_status' => 'unsynced' ),
+			),
+			true
+		);
+		if ( is_wp_error( $pattern_id ) || is_wp_error( $unsynced_pattern_id ) ) {
+			throw new RuntimeException( 'WordPress could not create the synced-pattern fixtures.' );
+		}
+		$shared_post_ids[] = (int) $pattern_id;
+		$shared_post_ids[] = (int) $unsynced_pattern_id;
+		$pattern_sources   = indexlane_wp_provider_sources( 'snapshot_pattern_provider', 'next_pattern_provider_source', $adapter_settings );
+		$pattern_by_key    = array_column( $pattern_sources, null, 'key' );
+		indexlane_wp_assert_same( true, isset( $pattern_by_key[ 'pattern:' . (int) $pattern_id ] ), 'Synced patterns must be exposed as exact shared sources.' );
+		indexlane_wp_assert_same( false, isset( $pattern_by_key[ 'pattern:' . (int) $unsynced_pattern_id ] ), 'Unsynced patterns must not be mislabeled as shared synced patterns.' );
+		$expected_shared_occurrences++;
+	}
+
+	$template_fixture_slug = 'indexlane-' . strtolower( str_replace( '-', '', wp_generate_uuid4() ) );
+	$template_fixtures     = array(
+		array( 'post_type' => 'wp_template', 'provider_type' => 'template', 'title' => 'IndexLane integration template', 'slug' => $template_fixture_slug . '-template' ),
+		array( 'post_type' => 'wp_template_part', 'provider_type' => 'template_part', 'title' => 'IndexLane integration footer', 'slug' => $template_fixture_slug . '-footer' ),
+	);
+	foreach ( $template_fixtures as $template_fixture ) {
+		if ( ! post_type_exists( $template_fixture['post_type'] ) || ! taxonomy_exists( 'wp_theme' ) ) {
+			continue;
+		}
+		$template_post_id = wp_insert_post(
+			array(
+				'post_type'    => $template_fixture['post_type'],
+				'post_status'  => 'publish',
+				'post_name'    => $template_fixture['slug'],
+				'post_title'   => $template_fixture['title'],
+				'post_content' => '<p><a href="' . esc_url( $coverage_target_url ) . '">Template target</a></p>',
+			),
+			true
+		);
+		if ( is_wp_error( $template_post_id ) ) {
+			throw new RuntimeException( $template_post_id->get_error_message() );
+		}
+		$theme_terms = wp_set_object_terms( (int) $template_post_id, get_stylesheet(), 'wp_theme' );
+		if ( is_wp_error( $theme_terms ) ) {
+			throw new RuntimeException( $theme_terms->get_error_message() );
+		}
+		if ( 'wp_template_part' === $template_fixture['post_type'] && taxonomy_exists( 'wp_template_part_area' ) ) {
+			$area_terms = wp_set_object_terms( (int) $template_post_id, 'footer', 'wp_template_part_area' );
+			if ( is_wp_error( $area_terms ) ) {
+				throw new RuntimeException( $area_terms->get_error_message() );
+			}
+		}
+		$shared_post_ids[] = (int) $template_post_id;
+		$template_fixture_keys[ $template_fixture['provider_type'] ] = $template_fixture['provider_type'] . ':' . get_stylesheet() . '//' . $template_fixture['slug'];
+		$expected_shared_occurrences++;
+	}
+
+	register_sidebar(
+		array(
+			'id'   => 'indexlane-integration-area',
+			'name' => 'IndexLane integration area',
+		)
+	);
+	$registered_sidebar = true;
+	$widget_instances = get_option( 'widget_block', array() );
+	$widget_instances = is_array( $widget_instances ) ? $widget_instances : array();
+	$numeric_widget_ids = array_filter( array_map( 'intval', array_keys( $widget_instances ) ) );
+	$widget_number      = empty( $numeric_widget_ids ) ? 1 : max( $numeric_widget_ids ) + 1;
+	$widget_instances[ $widget_number ] = array( 'content' => '<p><a href="' . esc_url( $coverage_target_url ) . '">Widget target</a></p>' );
+	update_option( 'widget_block', $widget_instances );
+	$sidebars = wp_get_sidebars_widgets();
+	$sidebars['indexlane-integration-area'] = array( 'block-' . $widget_number );
+	wp_set_sidebars_widgets( $sidebars );
+	$widget_sources = indexlane_wp_provider_sources( 'snapshot_widget_provider', 'next_widget_provider_source', $adapter_settings );
+	$widget_by_key  = array_column( $widget_sources, null, 'key' );
+	indexlane_wp_assert_same( true, isset( $widget_by_key[ 'widget:block-' . $widget_number ] ), 'Assigned block widgets must be exposed as exact shared sources.' );
+	indexlane_wp_assert_same( true, false !== strpos( $widget_by_key[ 'widget:block-' . $widget_number ]['title'], 'IndexLane integration area' ), 'Block widget identity must name the exact widget area where it is maintained.' );
+	$expected_shared_occurrences++;
+
+	$template_sources = indexlane_wp_provider_sources( 'snapshot_template_provider', 'next_template_provider_source', $adapter_settings );
+	$template_by_key  = array_column( $template_sources, null, 'key' );
+	if ( isset( $template_fixture_keys['template'] ) ) {
+		indexlane_wp_assert_same( true, isset( $template_by_key[ $template_fixture_keys['template'] ] ), 'A stored block template must be exposed through its unified WordPress identity.' );
+		$template_links = indexlane_wp_invoke( 'extract_links', array( $template_by_key[ $template_fixture_keys['template'] ]['content'] ) );
+		indexlane_wp_assert_same( 1, count( $template_links ), 'A block-template fixture must retain its exact stored occurrence.' );
+		indexlane_wp_assert_same( $coverage_target_url, $template_links[0]['href'], 'Block templates must expose links from their stored content without rendering.' );
+	}
+	foreach ( $template_sources as $template_source ) {
+		indexlane_wp_assert_same( true, 0 === strpos( $template_source['key'], 'template:' ), 'Block template sources must retain their unified WordPress identity.' );
+		indexlane_wp_assert_same( true, false !== strpos( $template_source['edit_url'], 'site-editor.php' ), 'Block template sources must link to their editor.' );
+	}
+	$template_part_sources = indexlane_wp_provider_sources( 'snapshot_template_part_provider', 'next_template_part_provider_source', $adapter_settings );
+	$template_part_by_key  = array_column( $template_part_sources, null, 'key' );
+	if ( isset( $template_fixture_keys['template_part'] ) ) {
+		indexlane_wp_assert_same( true, isset( $template_part_by_key[ $template_fixture_keys['template_part'] ] ), 'A stored template part must be exposed through its unified WordPress identity.' );
+		$template_part_links = indexlane_wp_invoke( 'extract_links', array( $template_part_by_key[ $template_fixture_keys['template_part'] ]['content'] ) );
+		indexlane_wp_assert_same( 1, count( $template_part_links ), 'A template-part fixture must retain its exact stored occurrence.' );
+		indexlane_wp_assert_same( $coverage_target_url, $template_part_links[0]['href'], 'Template parts must expose links from their stored content without rendering.' );
+	}
+	foreach ( $template_part_sources as $template_part_source ) {
+		indexlane_wp_assert_same( true, 0 === strpos( $template_part_source['key'], 'template_part:' ), 'Template-part sources must retain their unified WordPress identity.' );
+		indexlane_wp_assert_same( true, false !== strpos( $template_part_source['edit_url'], 'site-editor.php' ), 'Template-part sources must link to their editor.' );
+	}
+
+	$adapter_session = indexlane_wp_invoke( 'create_scan_session', array( $adapter_settings ) );
+	if ( is_wp_error( $adapter_session ) ) {
+		throw new RuntimeException( $adapter_session->get_error_message() );
+	}
+	for ( $adapter_batch = 0; $adapter_batch < 200 && 'complete' !== $adapter_session['status']; $adapter_batch++ ) {
+		if ( 'limit_reached' === $adapter_session['status'] ) {
+			$adapter_session['request_limit'] += 250;
+			$adapter_session['request_allowance_extensions']++;
+			$adapter_session['status'] = 'running';
+		}
+		$adapter_session = indexlane_wp_invoke( 'process_scan_batch', array( $adapter_session ) );
+	}
+	indexlane_wp_assert_same( 'complete', $adapter_session['status'], 'A scan selecting every built-in source adapter must complete through the normal engine.' );
+	$adapter_result_types = array_values( array_unique( array_column( $adapter_session['results'], 'source_type_code' ) ) );
+	sort( $adapter_result_types, SORT_STRING );
+	$expected_adapter_types = array( 'content', 'menu', 'widget' );
+	if ( isset( $navigation_key ) ) {
+		$expected_adapter_types[] = 'navigation';
+	}
+	if ( isset( $pattern_id ) ) {
+		$expected_adapter_types[] = 'pattern';
+	}
+	$expected_adapter_types = array_merge( $expected_adapter_types, array_keys( $template_fixture_keys ) );
+	$expected_adapter_types = array_values( array_unique( $expected_adapter_types ) );
+	sort( $expected_adapter_types, SORT_STRING );
+	indexlane_wp_assert_same( array(), array_values( array_diff( $expected_adapter_types, $adapter_result_types ) ), 'Every fixture-backed built-in adapter must retain evidence through the shared scan engine.' );
+	$adapter_coverage       = indexlane_wp_invoke( 'build_content_link_coverage', array( $adapter_session['content_items'], $adapter_session['results'] ) );
+	$adapter_coverage_by_id = array_column( $adapter_coverage, null, 'target_id' );
+	indexlane_wp_assert_same( 5, $adapter_coverage_by_id[ $coverage_target_id ]['contextual_incoming'], 'All-adapter coverage must retain contextual incoming occurrences.' );
+	indexlane_wp_assert_same( $expected_shared_occurrences, $adapter_coverage_by_id[ $coverage_target_id ]['shared_incoming'], 'All-adapter coverage must retain each exact shared fixture occurrence.' );
+	$http_calls = array();
+
 	$settings = indexlane_wp_invoke(
 		'get_request_settings',
 		array(
@@ -204,6 +462,7 @@ try {
 		)
 	);
 	indexlane_wp_assert_same( array( $post_type ), $settings['post_types'], 'Every registered public post type must be selectable.' );
+	indexlane_wp_assert_same( array( 'content' ), $settings['source_types'], 'Pre-0.6 programmatic scan requests must retain their content-only scope.' );
 	indexlane_wp_assert_same( 'all', $settings['content_scope'], 'The all-published-content scope must survive request validation.' );
 
 	$session = indexlane_wp_invoke( 'create_scan_session', array( $settings ) );
@@ -250,6 +509,7 @@ try {
 	}
 
 	indexlane_wp_assert_same( 'complete', $session['status'], 'The resumed WordPress session must complete.' );
+	indexlane_wp_assert_same( 7, $session['stats']['sources_processed'], 'Every selected stored source must be processed.' );
 	indexlane_wp_assert_same( 7, $session['stats']['content_items_processed'], 'Every selected content item must be processed.' );
 	indexlane_wp_assert_same( 8, $session['stats']['links_extracted'], 'Every link occurrence must be extracted.' );
 	indexlane_wp_assert_same( 7, $session['stats']['links_audited'], 'Only relevant same-site, old-domain, or staging occurrences are audited.' );
@@ -291,10 +551,11 @@ try {
 		throw new RuntimeException( $baseline->get_error_message() );
 	}
 	indexlane_wp_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'A completed WordPress scan must produce portable baseline evidence.' );
-	indexlane_wp_assert_same( 1, $baseline['schema_version'], 'The baseline must use the supported evidence schema.' );
-	indexlane_wp_assert_same( '0.5.1', $baseline['plugin_version'], 'The saved scan must identify the plugin version that created it.' );
+	indexlane_wp_assert_same( 2, $baseline['schema_version'], 'The baseline must use the source-aware evidence schema.' );
+	indexlane_wp_assert_same( '0.6.0', $baseline['plugin_version'], 'The saved scan must identify the plugin version that created it.' );
 	indexlane_wp_assert_same( $home, $baseline['site_url'], 'The baseline must be bound to this exact WordPress site URL.' );
-	indexlane_wp_assert_same( 7, $baseline['scope']['total_items'], 'The baseline must preserve the complete selected corpus.' );
+	indexlane_wp_assert_same( 7, $baseline['scope']['total_sources'], 'The baseline must preserve the complete selected source corpus.' );
+	indexlane_wp_assert_same( 7, $baseline['scope']['content_items'], 'The baseline must preserve the selected content-target corpus.' );
 	indexlane_wp_assert_same( true, $baseline['completion']['complete'], 'The baseline must explicitly record complete evidence.' );
 	indexlane_wp_assert_same( true, indexlane_wp_invoke( 'save_baseline', array( $baseline ) ), 'WordPress must persist one opt-in baseline for the current administrator.' );
 	indexlane_wp_assert_same( $baseline, indexlane_wp_invoke( 'get_saved_baseline' ), 'The saved baseline must round-trip through user-option validation.' );
@@ -315,6 +576,7 @@ try {
 		throw new RuntimeException( $verification_settings->get_error_message() );
 	}
 	indexlane_wp_assert_same( $baseline['settings']['post_types'], $verification_settings['post_types'], 'Verification must reproduce the saved public post types.' );
+	indexlane_wp_assert_same( $baseline['settings']['source_types'], $verification_settings['source_types'], 'Verification must reproduce the saved source providers.' );
 	indexlane_wp_assert_same( $baseline['settings']['content_scope'], $verification_settings['content_scope'], 'Verification must reproduce the saved content scope.' );
 	$baseline_fingerprint = indexlane_wp_invoke( 'baseline_fingerprint', array( $baseline ) );
 	$verification_session = indexlane_wp_invoke(
@@ -362,6 +624,25 @@ try {
 	delete_user_option( $administrator->ID, 'indexlane_rila_baseline', false );
 	foreach ( $fixture_ids as $fixture_id ) {
 		wp_delete_post( $fixture_id, true );
+	}
+	foreach ( $shared_post_ids as $shared_post_id ) {
+		wp_delete_post( $shared_post_id, true );
+	}
+	if ( $classic_menu_id > 0 ) {
+		wp_delete_nav_menu( $classic_menu_id );
+	}
+	if ( false === $widget_block_before ) {
+		delete_option( 'widget_block' );
+	} else {
+		update_option( 'widget_block', $widget_block_before );
+	}
+	if ( false === $sidebars_before ) {
+		delete_option( 'sidebars_widgets' );
+	} else {
+		update_option( 'sidebars_widgets', $sidebars_before );
+	}
+	if ( $registered_sidebar ) {
+		unregister_sidebar( 'indexlane-integration-area' );
 	}
 	unregister_post_type( $post_type );
 }
