@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.1 - 2026-09-07
+
+- Reworked the WordPress.org listing and README around migration checks, URL changes, and finding the exact editable source of a link.
+- Added an illustrated scan, save, fix, and recheck walkthrough and direct links to the existing sample CSV reports.
+- Replaced the public screenshots with a small demo showing a broken footer link, its editing location, and a genuine saved-scan comparison after editing the link.
+- Corrected development-build wording and aligned plugin metadata, saved-scan version assertions, and release packaging for 0.6.1.
+
 ## 0.6.0 - 2026-09-02
 
 - Added independently selectable link-source adapters for normal content, classic menus, Navigation entities, synced patterns, block templates, template parts, and assigned block widgets.

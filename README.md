@@ -1,10 +1,41 @@
 # IndexLane Redirect & Internal Link Auditor
 
-Audit redirects, broken links, and source-aware content link coverage across stored WordPress link surfaces.
+Find broken links and leftover migration URLs, open their editing locations, and check whether your fixes worked.
 
-The current 0.6 development build can inspect ordinary post content, classic menus, Navigation entities, synced patterns, block templates, template parts, and assigned block widgets. It remains read-only, never follows external redirect targets, and does not call an IndexLane service.
+IndexLane runs on demand inside WordPress admin. Use it after moving a site, changing page URLs, or taking over maintenance of an existing website. It checks selected stored WordPress sources and shows the page, menu, or template where each link is maintained.
 
-Project page: [indexlane.dev/plugins/redirect-internal-link-auditor](https://indexlane.dev/plugins/redirect-internal-link-auditor)
+[Install from WordPress.org](https://wordpress.org/plugins/indexlane-redirect-internal-link-auditor/) · [Project page](https://indexlane.dev/plugins/redirect-internal-link-auditor) · [Changelog](CHANGELOG.md)
+
+## When to use it
+
+- **After a migration:** find links to old domains you supply and common staging or development domains. These off-site URLs are reported without being fetched.
+- **After changing URLs:** find internal links that still take a redirect or end at a broken page, then open the source to update them.
+- **During maintenance:** trace a broken link to its exact page, menu, pattern, template, or assigned block widget. Save the scan and check your fixes against the same scope.
+
+The plugin never edits content or creates redirects. It requires no account or IndexLane service. It reads stored sources; it does not crawl rendered pages or inspect unsupported page-builder data.
+
+## Scan, fix, and check again
+
+1. Open **Tools → Redirect & Internal Link Auditor**, choose the areas and content types to check, and select **Start scan**.
+2. Keep the page open while the scan runs. You can pause and return later; if it reaches the request limit, increase the allowance to continue.
+3. Review **Problem URLs** and the editing links under **Where it appears**. When several sources are affected, expand **View affected sources**. Use **Link details** for old-domain and staging links as well as the full scan evidence.
+4. Select **Save these results for comparison** before editing anything.
+5. Fix the links in their WordPress editors, return to the auditor, and select **Check fixes against saved scan**.
+6. Review what is resolved or still present, then select **Download comparison** to keep the result or share it with a client.
+
+[Follow the illustrated walkthrough](docs/quick-start.md) for a small demo site with a broken footer link and an outdated service URL.
+
+![A demo site's broken footer link and the exact menu where it can be edited.](assets/screenshot-1.png)
+
+## Preview the reports
+
+These example CSVs use fictional site data and the current export columns:
+
+- [Problem URLs](docs/sample-destination-impact.csv): grouped destinations and their editable sources.
+- [Link details](docs/sample-report.csv): every occurrence, editing location, and HTTP result.
+- [Content coverage](docs/sample-target-coverage.csv): incoming links from content and shared areas.
+
+Completed scans also provide a comparison CSV after a fix check. Downloads reuse the displayed evidence without making another scan.
 
 ## WordPress-native link sources
 

@@ -1145,7 +1145,7 @@ $baseline = indexlane_invoke( 'build_baseline_from_session', array( $baseline_se
 indexlane_assert_same( false, is_wp_error( $baseline ), 'A complete consistent scan must produce portable baseline evidence.' );
 indexlane_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'Baseline JSON must identify its document format.' );
 indexlane_assert_same( 2, $baseline['schema_version'], 'Baseline JSON must carry an explicit source-aware schema version.' );
-indexlane_assert_same( '0.6.0', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
+indexlane_assert_same( '0.6.1', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
 indexlane_assert_same( 'https://example.test', $baseline['site_url'], 'Baseline site ownership must use a normalized exact home URL.' );
 indexlane_assert_same( true, $baseline['completion']['complete'], 'Only complete evidence may be saved as a baseline.' );
 indexlane_assert_same( 0, $baseline['completion']['request_allowance_extensions'], 'Baseline metadata must preserve the request-limit extension state.' );

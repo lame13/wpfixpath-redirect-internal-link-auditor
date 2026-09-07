@@ -254,7 +254,7 @@ $state = 'complete' === $state ? 'verification' : $state;
 
 indexlane_screenshot_invoke( 'delete_scan_session' );
 delete_user_option( $administrator->ID, 'indexlane_rila_baseline', false );
-update_option( 'blogname', 'IndexLane 0.6.0 Test WordPress' );
+update_option( 'blogname', 'IndexLane Demo Site' );
 indexlane_screenshot_reset_shared_sources();
 if ( 'empty' === $state ) {
 	fwrite( STDOUT, "Empty screenshot state prepared.\n" );

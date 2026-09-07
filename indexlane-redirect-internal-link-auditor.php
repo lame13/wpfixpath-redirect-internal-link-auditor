@@ -2,8 +2,8 @@
 /**
  * Plugin Name: IndexLane Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
- * Description: Audit redirects, broken links, and source-aware internal link coverage inside WordPress.
- * Version: 0.6.0
+ * Description: Find broken links and leftover migration URLs, open their editing locations, and check whether your fixes worked.
+ * Version: 0.6.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -37,7 +37,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		use IndexLane_Redirect_Internal_Link_Auditor_Baselines;
 
 		private const PLUGIN_FILE                     = __FILE__;
-		private const VERSION                         = '0.6.0';
+		private const VERSION                         = '0.6.1';
 		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY                      = 'manage_options';
 		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';

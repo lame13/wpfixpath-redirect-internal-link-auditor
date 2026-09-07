@@ -4,59 +4,57 @@ Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.6.0
+Stable tag: 0.6.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Audit redirects, broken links, and source-aware internal link coverage inside WordPress.
+Find broken links and leftover migration URLs, open their editing locations, and check whether your fixes worked.
 
 == Description ==
 
-IndexLane Redirect & Internal Link Auditor finds broken, redirected, old-site, and staging links. It shows where links appear and checks whether your fixes worked against an explicitly saved scan.
+Changed page URLs, moved a WordPress site, or taken over its maintenance? IndexLane finds broken links and leftover migration URLs in selected stored WordPress sources. It shows the page, menu, or template where each link is maintained, then checks whether your edits resolved the issue.
 
-It runs from inside WordPress admin, stays read-only, and produces results a site owner or developer can review or download. It does not auto-fix content or change the database.
+Run it on demand from WordPress admin. No account or external scanning service is required. The plugin never edits your content or creates redirects.
 
-Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor).
+= Check links after a migration =
 
-Version 0.6 can:
+Supply your old domains to find links that still point there. Common staging and development domains are also flagged. These off-site URLs are listed for review without contacting those sites.
 
-* Scan all published content or a numeric limit of the newest content.
-* Scan any registered public post type, not only posts, pages, and products.
-* Select stored link sources independently.
-* Inspect normal post content, classic menus, Navigation entities, synced patterns, block templates, template parts, and assigned block widgets.
-* Check same-site link status.
-* Flag 404/410 responses.
-* Flag 301/302 redirects and redirect chains.
-* Flag links to old domains supplied by the administrator.
-* Flag common staging and development-domain links.
-* Retain each source's exact identity, surface, edit URL, link text, and contextual or shared/global scope.
-* Group broken/error and redirected URLs by times linked and editable sources affected.
-* Show status, redirects, final URL, warnings, and outcome for each URL.
-* Report one content-link coverage row per scanned published item.
-* Count contextual links, navigation/shared links, distinct editable sources, outgoing links, distinct URLs, link-text variants, self-links, and direct versus redirected incoming links.
-* Resolve redirects to their final published WordPress content item while retaining redirect results.
-* Filter content with zero or one detected editable source and open every target's exact source details.
-* Download separate content-coverage, problem-URL, and link-detail CSV reports.
-* Save one explicitly selected completed scan for comparison per administrator.
-* Download and upload strict, versioned, site-specific saved-scan JSON.
-* Rerun the saved scan's exact scope as a fix check.
-* Classify issue URLs as new, changed, resolved, or still present.
-* Compare saved-scan and latest-scan status chains, redirects, final URLs, outcomes, times linked, and affected-source counts.
-* Download the exact completed comparison as CSV.
-* Delete the saved scan explicitly without changing current scan results.
-* Show live stored sources checked, links found, unique URLs, and links needing attention.
-* Pause, continue, cancel, and resume a saved scan after reloading the page.
-* Provide translation-ready administrator, progress, result, JavaScript, and CSV strings through the WordPress.org text domain.
+= Clean up links after changing URLs =
 
-The problem-URL view is derived from the completed link results. It does not make more HTTP requests. A URL found once in a shared Footer template part is reported against that exact editable source, with a direct edit link.
+Find internal links that still take a redirect, follow a redirect chain, or end at a 404/410 response. Review the final URL and open the original source to update the link.
 
-The content-link coverage view is also derived from the exact completed scan without additional HTTP requests. “No incoming links detected in selected sources” means only that no links were found in the stored adapters chosen for that scan. Shortcode output, arbitrary metadata, proprietary page-builder storage, and rendered frontend output remain outside these results.
+= Find the place to edit =
 
-Third-party plugins can register reliable stored-source adapters through the `indexlane_rila_source_providers` filter. The provider supplies bounded snapshot and next-source callbacks plus stable source identity and edit evidence; this plugin does not maintain proprietary storage parsers.
+A broken footer link may be maintained once in a menu or template part. IndexLane keeps that editing location with the result, alongside the link text and whether its source is individual content or a shared site-wide area.
 
-URL grouping normalizes scheme and host case, fragments, and default ports. Paths, query strings, schemes, non-default ports, and trailing slashes remain distinct because they can return different results.
+Choose which stored sources to inspect: published posts, pages and public custom post types; classic menus; Navigation entities; synced patterns; block templates and template parts; and assigned block widgets.
 
-HTTP requests are made only to the current site. Links to old, staging, or development domains are still reported for review.
+= Save a scan and check your fixes =
+
+1. Open **Tools -> Redirect & Internal Link Auditor**, choose the areas to check, and select **Start scan**.
+2. Review **Problem URLs** and the sources under **Where it appears**. Use **Link details** for the full list, including old-domain and staging links.
+3. Select **Save these results for comparison** before editing the links.
+4. Fix the links in their WordPress editors, return to the auditor, and select **Check fixes against saved scan**.
+5. Review new, changed, resolved, and still-present issues. Select **Download comparison** to keep the evidence or share it with a client.
+
+Keep the scan page open while it runs. You can pause, return later, and continue. If the request limit is reached, increase the allowance to finish the selected scope.
+
+See the [illustrated walkthrough](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.6.1/docs/quick-start.md) for a demo site with a broken footer link and an outdated service URL.
+
+= Preview the reports =
+
+These sample CSVs contain fictional site data and show the current export columns:
+
+* [Problem URLs](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.6.1/docs/sample-destination-impact.csv): grouped broken and redirected destinations with their editing locations.
+* [Link details](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.6.1/docs/sample-report.csv): individual links, source locations, and HTTP results.
+* [Content coverage](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.6.1/docs/sample-target-coverage.csv): incoming links from content and shared areas, outgoing links, and link text.
+
+Content coverage includes a filter for pages with zero or one detected linking source. “No incoming links detected in selected sources” describes only the stored sources selected for that scan; it does not prove that a page is an orphan.
+
+All reports reuse the completed scan without making more HTTP requests. Saved scans can also be downloaded and uploaded as site-specific JSON for longer-term storage.
+
+Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor). Developers can register additional stored-source adapters through the documented `indexlane_rila_source_providers` filter in the [project README](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.6.1/README.md).
 
 == Data handling ==
 
@@ -81,8 +79,8 @@ Each AJAX batch makes at most five outbound HTTP requests. A session begins with
 3. Go to `Tools -> Redirect & Internal Link Auditor`.
 4. Select the stored link sources, public content types, and content limit.
 5. Start the scan, keep the page open while it runs, or pause and return later.
-6. Review source-aware content coverage and download content-coverage, problem-URL, or link-detail CSV reports after the session completes.
-7. Optionally save the completed scan for comparison, then check your fixes against the saved scan and download the comparison.
+6. Review Problem URLs for broken and redirected destinations, and Link details for all findings, including old-domain and staging links.
+7. Save the completed results for comparison, edit the links in WordPress, then check your fixes against the saved scan and download the comparison.
 
 == Frequently Asked Questions ==
 
@@ -104,11 +102,18 @@ No. Old-site, staging, and development-site links are flagged but not fetched. A
 
 == Screenshots ==
 
-1. Choose where to check for links across content, menus, Navigation blocks, patterns, templates, template parts, and widgets.
-2. Pause or continue a scan while seeing stored sources checked, links found, URLs checked, and links needing attention.
-3. Review source-aware coverage with individual-content and site-wide counts plus the exact place where each link can be edited.
+1. Find a broken footer link and open the exact menu where it is maintained. Results shown are from a small demo site.
+2. Check fixes against a saved scan: the demo footer link is resolved, while an outdated service URL still needs attention.
+3. Choose the WordPress areas and content types to scan. The demo checks pages and classic menus.
 
 == Changelog ==
+
+= 0.6.1 =
+
+* Reworked the listing around migration checks, URL changes, and finding the exact place to edit a link.
+* Added a scan, save, fix, and recheck walkthrough with links to sample CSV reports.
+* Replaced the public screenshots with a small demo showing a broken footer link, its editing location, and a real fix comparison.
+* Corrected the README's development-build wording and aligned release metadata and verification assertions.
 
 = 0.6.0 =
 
