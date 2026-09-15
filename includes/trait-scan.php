@@ -327,7 +327,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * Extract links from stored HTML or block content.
 	 *
 	 * @param string $content Stored source content.
-	 * @return array<int,array{href:string,anchor:string}>
+	 * @return array<int,array{href:string,anchor:string,rel?:string}>
 	 */
 	private static function extract_links( string $content ): array {
 		if ( '' === trim( $content ) ) {
@@ -345,7 +345,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * Extract links using DOMDocument.
 	 *
 	 * @param string $content Post content.
-	 * @return array<int,array{href:string,anchor:string}>
+	 * @return array<int,array{href:string,anchor:string,rel?:string}>
 	 */
 	private static function extract_links_with_dom( string $content ): array {
 		$links    = array();
@@ -369,6 +369,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			$links[] = array(
 				'href'   => $href,
 				'anchor' => self::normalize_anchor_text( (string) $node->textContent ),
+				'rel'    => self::normalize_link_rel( (string) $node->getAttribute( 'rel' ) ),
 			);
 		}
 
@@ -379,7 +380,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * Extract links using a small fallback regex.
 	 *
 	 * @param string $content Post content.
-	 * @return array<int,array{href:string,anchor:string}>
+	 * @return array<int,array{href:string,anchor:string,rel?:string}>
 	 */
 	private static function extract_links_with_regex( string $content ): array {
 		$links = array();
@@ -394,9 +395,20 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 				continue;
 			}
 
+			$rel     = '';
+			$opening = '';
+			if ( 1 === preg_match( '/<a\b[^>]*>/i', (string) $match[0], $opening_match ) ) {
+				$opening = (string) $opening_match[0];
+			}
+			$attrs = self::html_tag_attributes( $opening );
+			if ( isset( $attrs['rel'] ) ) {
+				$rel = self::normalize_link_rel( $attrs['rel'] );
+			}
+
 			$links[] = array(
 				'href'   => $href,
 				'anchor' => self::normalize_anchor_text( wp_strip_all_tags( $match[3] ) ),
+				'rel'    => $rel,
 			);
 		}
 
@@ -406,7 +418,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	/**
 	 * Classify an occurrence before any HTTP work is scheduled.
 	 *
-	 * @param array{href:string,anchor:string} $link         Extracted link.
+	 * @param array{href:string,anchor:string,rel?:string} $link         Extracted link.
 	 * @param array<string,mixed>              $source       Source post data.
 	 * @param array<string,mixed>              $settings     Sanitized settings.
 	 * @param string                           $current_host Normalized current site host.
@@ -502,6 +514,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 				'warnings'   => $warnings,
 				'is_old'     => $is_old,
 				'is_staging' => $is_staging,
+				'fragment'   => self::link_fragment_from_href( $link['href'] ),
 			),
 		);
 	}
@@ -530,7 +543,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 				$check['final_url'],
 				self::format_warning_text( $warnings ),
 				__( 'Error', 'indexlane-redirect-internal-link-auditor' ),
-				'error'
+				'error',
+				self::link_rel_intent_finding( isset( $occurrence['link']['rel'] ) ? (string) $occurrence['link']['rel'] : '' )
 			);
 		}
 
@@ -586,12 +600,16 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			);
 		}
 
-		$result_code = self::result_code_for_check(
-			$warnings,
-			$final_status,
-			(int) $check['redirect_count'],
-			(bool) $occurrence['is_old'],
-			(bool) $occurrence['is_staging']
+		$intent      = self::occurrence_intent_summary( $occurrence, $check );
+		$result_code = self::merge_intent_result_code(
+			self::result_code_for_check(
+				$warnings,
+				$final_status,
+				(int) $check['redirect_count'],
+				(bool) $occurrence['is_old'],
+				(bool) $occurrence['is_staging']
+			),
+			(string) $intent['severity']
 		);
 		$result      = self::result_label_for_code( $result_code );
 
@@ -604,7 +622,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			$check['final_url'],
 			self::format_warning_text( $warnings ),
 			$result,
-			$result_code
+			$result_code,
+			$intent
 		);
 	}
 
@@ -623,6 +642,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			'redirect_limit_reached' => false,
 			'redirect_loop'          => false,
 			'redirect_left_site'     => false,
+			'intent'                 => self::empty_intent_evidence(),
+			'redirect_fragment'      => null,
 		);
 	}
 
@@ -660,6 +681,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 
 		$status              = (int) wp_remote_retrieve_response_code( $response );
 		$state['statuses'][] = (string) $status;
+		$state['intent']     = self::inspect_response_intent( $response, $current_url );
 		if ( ! in_array( $status, array( 301, 302, 303, 307, 308 ), true ) ) {
 			return array(
 				'complete'     => true,
@@ -695,6 +717,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			);
 		}
 
+		if ( false !== strpos( $location, '#' ) ) {
+			$state['redirect_fragment'] = self::link_fragment_from_href( $location );
+		}
 		$next_url = self::make_absolute_url( $location, $current_url );
 		$state['current_url'] = $next_url;
 		if ( ! self::is_valid_http_url( $next_url ) ) {
@@ -756,6 +781,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			'redirect_limit_reached' => (bool) $state['redirect_limit_reached'],
 			'redirect_loop'          => (bool) $state['redirect_loop'],
 			'redirect_left_site'     => (bool) $state['redirect_left_site'],
+			'intent'                 => isset( $state['intent'] ) && is_array( $state['intent'] ) ? $state['intent'] : self::empty_intent_evidence(),
+			'redirect_fragment'      => isset( $state['redirect_fragment'] ) ? $state['redirect_fragment'] : null,
 			'budget_exhausted'       => false,
 		);
 	}
@@ -823,7 +850,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * Build a result row.
 	 *
 	 * @param array<string,mixed>              $source         Source post data.
-	 * @param array{href:string,anchor:string} $link           Extracted link.
+	 * @param array{href:string,anchor:string,rel?:string} $link           Extracted link.
 	 * @param string                           $linked_url     Linked URL.
 	 * @param string                           $http_status    Status chain text.
 	 * @param int|string                       $redirect_count Redirect count.
@@ -831,13 +858,16 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	 * @param string                           $warning        Warning.
 	 * @param string                           $result         Result label.
 	 * @param string                           $result_code    Stable result code.
+	 * @param array{code?:string,severity?:string,detail?:string} $intent Destination-intent evidence for this occurrence.
 	 * @return array<string,mixed>
 	 */
-	private static function build_result_row( array $source, array $link, string $linked_url, string $http_status, $redirect_count, string $final_url, string $warning, string $result, string $result_code = '' ): array {
+	private static function build_result_row( array $source, array $link, string $linked_url, string $http_status, $redirect_count, string $final_url, string $warning, string $result, string $result_code = '', array $intent = array() ): array {
 		if ( '' === $result_code ) {
 			$result_code = self::result_code_from_label( $result );
 		}
 
+		$intent               = array_merge( self::empty_intent_summary(), $intent );
+		$linked_fragment      = self::link_fragment_from_href( $link['href'] );
 		$redirect_count_value = is_numeric( $redirect_count ) ? max( 0, (int) $redirect_count ) : 0;
 		$is_same_site         = self::is_same_site_url( $linked_url );
 		$direct_target_id      = $is_same_site ? self::published_content_id_for_url( $linked_url ) : 0;
@@ -856,14 +886,18 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			'source_content_id'  => isset( $source['content_id'] ) ? max( 0, (int) $source['content_id'] ) : 0,
 			'source_url'         => $source['url'],
 			'source_edit_url'    => $source['edit_url'],
-			'linked_url'         => $linked_url,
+			'linked_url'         => $is_same_site && '' !== $linked_fragment && false === strpos( $linked_url, '#' ) ? $linked_url . '#' . $linked_fragment : $linked_url,
 			'http_status'        => $http_status,
 			'redirect_count'     => $redirect_count_value,
 			'final_url'          => $final_url,
 			'warning'            => $warning,
 			'anchor_text'        => $link['anchor'],
+			'link_rel'           => isset( $link['rel'] ) && is_string( $link['rel'] ) ? self::normalize_link_rel( $link['rel'] ) : '',
 			'result'             => $result,
 			'result_code'        => $result_code,
+			'intent_code'        => (string) $intent['code'],
+			'intent_severity'    => (string) $intent['severity'],
+			'intent_detail'      => (string) $intent['detail'],
 			'is_same_site'       => $is_same_site,
 			'direct_target_id'   => $direct_target_id,
 			'final_target_id'    => $final_target_id,
@@ -1361,6 +1395,783 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 		}
 
 		return $text;
+	}
+
+	/**
+	 * Empty destination-intent evidence for one URL check.
+	 *
+	 * @return array<string,mixed>
+	 */
+	private static function empty_intent_evidence(): array {
+		return array(
+			'checked'            => false,
+			'content_type'       => '',
+			'content_kind'       => '',
+			'body_truncated'     => false,
+			'canonical'          => '',
+			'canonical_state'    => '',
+			'header_noindex'     => false,
+			'header_nofollow'    => false,
+			'meta_noindex'       => false,
+			'meta_nofollow'      => false,
+			'meta_refresh'       => '',
+			'fragments'          => array(),
+			'fragments_complete' => false,
+		);
+	}
+
+	/**
+	 * Empty occurrence-level intent summary.
+	 *
+	 * @return array{code:string,severity:string,detail:string}
+	 */
+	private static function empty_intent_summary(): array {
+		return array(
+			'code'     => '',
+			'severity' => '',
+			'detail'   => '',
+		);
+	}
+
+	/**
+	 * Inspect one final same-site response for destination-intent evidence.
+	 *
+	 * Only a 2xx response can be judged: a broken or redirected response has no
+	 * page intent to compare, and a response that leaves the site is never
+	 * fetched at all. The body is inspected for the signals that require it and
+	 * then discarded; only derived text and flags are stored.
+	 *
+	 * @param array<string,mixed> $response     WordPress HTTP response.
+	 * @param string              $response_url URL that produced this response.
+	 * @return array<string,mixed>
+	 */
+	private static function inspect_response_intent( array $response, string $response_url ): array {
+		$intent = self::empty_intent_evidence();
+		$status = (int) wp_remote_retrieve_response_code( $response );
+		if ( $status < 200 || $status > 299 ) {
+			return $intent;
+		}
+
+		$content_type  = self::truncate_text( self::header_text_value( wp_remote_retrieve_header( $response, 'content-type' ) ), 200 );
+		$robots_header = self::header_text_value( wp_remote_retrieve_header( $response, 'x-robots-tag' ) );
+		$body          = wp_remote_retrieve_body( $response );
+		$body          = is_string( $body ) ? $body : '';
+
+		$intent['checked']         = true;
+		$intent['content_type']    = $content_type;
+		$intent['content_kind']    = self::response_content_kind( $content_type );
+		$intent['body_truncated']  = 206 === $status || '' !== self::header_text_value( wp_remote_retrieve_header( $response, 'content-range' ) ) || strlen( $body ) >= self::RESPONSE_SIZE_LIMIT;
+		$intent['header_noindex']  = self::robots_text_has_directive( $robots_header, 'noindex' );
+		$intent['header_nofollow'] = self::robots_text_has_directive( $robots_header, 'nofollow' );
+
+		if ( 'html' !== $intent['content_kind'] && '' !== $intent['content_kind'] ) {
+			return $intent;
+		}
+
+		$body = substr( $body, 0, self::RESPONSE_SIZE_LIMIT );
+		$document                  = self::parse_document_evidence( $body, $response_url );
+		$intent['canonical']       = $document['canonical'];
+		$intent['canonical_state'] = $document['canonical_state'];
+		$intent['meta_noindex']    = $document['meta_noindex'];
+		$intent['meta_nofollow']   = $document['meta_nofollow'];
+		$intent['meta_refresh']    = $document['meta_refresh'];
+
+		if ( ! $intent['body_truncated'] && ( 'html' === $intent['content_kind'] || preg_match( '/<(?:html|head|body)\b/i', $body ) ) ) {
+			$targets                      = self::html_fragment_targets( $body );
+			$intent['fragments']          = $targets['targets'];
+			$intent['fragments_complete'] = $targets['complete'];
+		}
+
+		return $intent;
+	}
+
+	/**
+	 * Read the stored page-intent signals from one HTML document.
+	 *
+	 * @param string $html         Response body.
+	 * @param string $response_url URL that produced the response.
+	 * @return array<string,mixed>
+	 */
+	private static function parse_document_evidence( string $html, string $response_url ): array {
+		$evidence = array(
+			'canonical'       => '',
+			'canonical_state' => '',
+			'meta_noindex'    => false,
+			'meta_nofollow'   => false,
+			'meta_refresh'    => '',
+		);
+
+		if ( '' === trim( $html ) ) {
+			return $evidence;
+		}
+
+		$tags     = self::intent_html_tags( $html );
+		$base_url = $response_url;
+		foreach ( $tags as $tag ) {
+			if ( preg_match( '/^<base\s/i', $tag ) ) {
+				$attributes = self::html_tag_attributes( $tag );
+				if ( isset( $attributes['href'] ) ) {
+					$resolved = self::make_absolute_url( $attributes['href'], $response_url );
+					$base_url = self::is_valid_http_url( $resolved ) ? $resolved : $response_url;
+					break;
+				}
+			}
+		}
+
+		foreach ( $tags as $tag ) {
+			if ( preg_match( '/^<meta\s/i', $tag ) ) {
+				$attributes = self::html_tag_attributes( (string) $tag );
+				$name       = isset( $attributes['name'] ) ? strtolower( trim( $attributes['name'] ) ) : '';
+				$content    = isset( $attributes['content'] ) ? $attributes['content'] : '';
+
+				if ( 'robots' === $name ) {
+					$evidence['meta_noindex']  = $evidence['meta_noindex'] || self::robots_text_has_directive( $content, 'noindex' );
+					$evidence['meta_nofollow'] = $evidence['meta_nofollow'] || self::robots_text_has_directive( $content, 'nofollow' );
+					continue;
+				}
+
+				$http_equiv = isset( $attributes['http-equiv'] ) ? strtolower( trim( $attributes['http-equiv'] ) ) : '';
+				if ( 'refresh' === $http_equiv && '' === $evidence['meta_refresh'] ) {
+					$evidence['meta_refresh'] = self::meta_refresh_target( $content, $base_url );
+				}
+			}
+		}
+
+		foreach ( $tags as $tag ) {
+			if ( preg_match( '/^<link\s/i', $tag ) ) {
+				$attributes = self::html_tag_attributes( (string) $tag );
+				$rel        = isset( $attributes['rel'] ) ? strtolower( trim( $attributes['rel'] ) ) : '';
+				if ( '' === $rel || ! preg_match( '/(^|[\s,])canonical([\s,]|$)/', $rel ) ) {
+					continue;
+				}
+
+				$href                        = isset( $attributes['href'] ) ? trim( $attributes['href'] ) : '';
+				$canonical                   = '' !== $href && ! preg_match( '/^(?!https?:)[a-z][a-z0-9+.-]*:/i', $href ) ? self::make_absolute_url( $href, $base_url ) : '';
+				$evidence['canonical']       = self::truncate_text( $canonical, 2048 );
+				$evidence['canonical_state'] = self::canonical_state_for( $canonical, $response_url );
+				break;
+			}
+		}
+
+		return $evidence;
+	}
+
+	/**
+	 * Read complete opening tags, skipping comments and inert/raw-text contents.
+	 * Quoted greater-than signs and markup inside attributes stay in their tag.
+	 *
+	 * @param string $html Bounded response HTML.
+	 * @return array<int,string>
+	 */
+	private static function intent_html_tags( string $html ): array {
+		$pattern = '~<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|template)\b(?:"[^"]*"|\'[^\']*\'|[^\'">])*?>[\s\S]*?(?:</\1\s*>|$)|<([a-z][a-z0-9:-]*)(?=[\s/>])(?:"[^"]*"|\'[^\']*\'|[^\'">])*>~i';
+		if ( ! preg_match_all( $pattern, $html, $matches, PREG_SET_ORDER ) ) {
+			return array();
+		}
+
+		$tags = array();
+		foreach ( $matches as $match ) {
+			if ( ! empty( $match[2] ) ) {
+				$tags[] = $match[0];
+			}
+		}
+		return $tags;
+	}
+
+	/**
+	 * Parse the attributes of one HTML tag without loading a DOM document.
+	 *
+	 * @param string $tag Tag markup.
+	 * @return array<string,string>
+	 */
+	private static function html_tag_attributes( string $tag ): array {
+		$attributes = array();
+		if ( ! preg_match_all( '/\s+([a-zA-Z_:][-a-zA-Z0-9_:.]*)\s*=\s*(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'<>`]+))/', $tag, $matches, PREG_SET_ORDER ) ) {
+			return $attributes;
+		}
+
+		foreach ( $matches as $match ) {
+			$name = strtolower( (string) $match[1] );
+			if ( isset( $attributes[ $name ] ) ) {
+				continue;
+			}
+
+			$value = self::html_attribute_value( $match );
+			$attributes[ $name ] = $value;
+		}
+
+		return $attributes;
+	}
+
+	/**
+	 * Read the value from one attribute-parse match.
+	 *
+	 * @param array<int,string> $match Attribute match.
+	 */
+	private static function html_attribute_value( array $match ): string {
+		foreach ( array( 2, 3, 4 ) as $index ) {
+			if ( isset( $match[ $index ] ) && '' !== $match[ $index ] ) {
+				return html_entity_decode( (string) $match[ $index ], ENT_QUOTES );
+			}
+		}
+
+		return '';
+	}
+
+	/**
+	 * Resolve a meta-refresh target relative to the response URL.
+	 *
+	 * @param string $content      Meta refresh content attribute.
+	 * @param string $response_url URL that produced the response.
+	 */
+	private static function meta_refresh_target( string $content, string $response_url ): string {
+		$content = trim( html_entity_decode( $content, ENT_QUOTES ) );
+		if ( '' === $content ) {
+			return '';
+		}
+
+		$target = '';
+		if ( preg_match( '/url\s*=\s*[\'"]?\s*([^\'";]+)/i', $content, $matches ) ) {
+			$target = trim( (string) $matches[1] );
+		}
+
+		if ( '' === $target ) {
+			return self::truncate_text( $content, 200 );
+		}
+
+		$absolute = self::make_absolute_url( $target, $response_url );
+		if ( '' === $absolute || ! self::is_valid_http_url( $absolute ) ) {
+			return self::truncate_text( $target, 200 );
+		}
+
+		return self::truncate_text( $absolute, 2048 );
+	}
+
+	/**
+	 * Describe how a stored canonical link relates to the fetched URL.
+	 *
+	 * @param string $canonical    Canonical href.
+	 * @param string $response_url URL that produced the response.
+	 */
+	private static function canonical_state_for( string $canonical, string $response_url ): string {
+		$canonical = trim( $canonical );
+		if ( '' === $canonical ) {
+			return 'invalid';
+		}
+
+		$absolute = self::make_absolute_url( $canonical, $response_url );
+		if ( '' === $absolute || ! self::is_valid_http_url( $absolute ) ) {
+			return 'invalid';
+		}
+
+		$canonical_host = self::normalize_host( (string) wp_parse_url( $absolute, PHP_URL_HOST ) );
+		$response_host  = self::normalize_host( (string) wp_parse_url( $response_url, PHP_URL_HOST ) );
+		if ( ! self::hosts_match( $canonical_host, $response_host ) ) {
+			return 'offsite';
+		}
+
+		$canonical_key = self::normalize_destination_for_impact( $absolute );
+		$response_key  = self::normalize_destination_for_impact( $response_url );
+		if ( '' === $canonical_key || '' === $response_key ) {
+			return 'invalid';
+		}
+
+		return $canonical_key === $response_key ? 'same' : 'differs';
+	}
+
+	/**
+	 * Collect the fragment targets stored in one HTML document.
+	 *
+	 * @param string $html Response body.
+	 * @return array{targets:array<int,string>,complete:bool}
+	 */
+	private static function html_fragment_targets( string $html ): array {
+		$targets  = array();
+		$tags     = self::intent_html_tags( $html );
+		$complete = PREG_NO_ERROR === preg_last_error();
+		foreach ( $tags as $tag ) {
+			$attributes = self::html_tag_attributes( $tag );
+			$names      = preg_match( '/^<a\s/i', $tag ) ? array( 'id', 'name' ) : array( 'id' );
+			foreach ( $names as $name ) {
+				$value = isset( $attributes[ $name ] ) ? $attributes[ $name ] : '';
+				if ( strlen( $value ) > self::MAX_INTENT_FRAGMENT_LENGTH ) {
+					$complete = false;
+					continue;
+				}
+				if ( '' === $value || isset( $targets[ $value ] ) ) {
+					continue;
+				}
+
+				if ( count( $targets ) >= self::MAX_INTENT_FRAGMENT_TARGETS ) {
+					$complete = false;
+					break 2;
+				}
+
+				$targets[ $value ] = true;
+			}
+		}
+
+		return array(
+			'targets'  => array_map( 'strval', array_keys( $targets ) ),
+			'complete' => $complete,
+		);
+	}
+
+	/**
+	 * Whether one stored fragment target is present in the inspected document.
+	 *
+	 * @param string            $fragment Requested fragment.
+	 * @param array<int,string> $targets  Stored fragment targets.
+	 */
+	private static function fragment_target_exists( string $fragment, array $targets ): bool {
+		$candidates = array( $fragment );
+		$decoded    = rawurldecode( $fragment );
+		if ( $decoded !== $fragment ) {
+			$candidates[] = $decoded;
+		}
+
+		foreach ( $candidates as $candidate ) {
+			foreach ( $targets as $target ) {
+				if ( ! is_string( $target ) ) {
+					continue;
+				}
+
+				if ( $target === $candidate ) {
+					return true;
+				}
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Read an HTTP header that may be stored as one value or a list.
+	 *
+	 * @param mixed $value Header value.
+	 */
+	private static function header_text_value( $value ): string {
+		if ( is_array( $value ) ) {
+			$value = array_filter( $value, 'is_scalar' );
+			$value = implode( ', ', array_map( 'strval', $value ) );
+		}
+
+		return is_string( $value ) ? trim( $value ) : '';
+	}
+
+	/**
+	 * Whether a robots directive list contains one directive.
+	 *
+	 * @param string $text      Robots header or meta content.
+	 * @param string $directive Directive name.
+	 */
+	private static function robots_text_has_directive( string $text, string $directive ): bool {
+		$text = strtolower( trim( $text ) );
+		if ( '' === $text ) {
+			return false;
+		}
+
+		$tokens = preg_split( '/[\s,;:]+/', $text );
+		if ( ! is_array( $tokens ) ) {
+			return false;
+		}
+
+		foreach ( $tokens as $token ) {
+			$token = trim( $token );
+			if ( $directive === $token || 'none' === $token ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	/**
+	 * Classify a response content type into a small family.
+	 *
+	 * @param string $content_type Lowercased content type.
+	 */
+	private static function response_content_kind( string $content_type ): string {
+		$content_type = strtolower( trim( explode( ';', $content_type, 2 )[0] ) );
+		if ( '' === $content_type ) {
+			return '';
+		}
+
+		if ( in_array( $content_type, array( 'text/html', 'application/xhtml+xml' ), true ) ) {
+			return 'html';
+		}
+
+		if ( 'application/pdf' === $content_type ) {
+			return 'pdf';
+		}
+
+		if ( 0 === strpos( $content_type, 'image/' ) ) {
+			return 'image';
+		}
+
+		return 'other';
+	}
+
+	/**
+	 * Read the fragment part of one stored link href.
+	 *
+	 * @param string $href Stored href.
+	 */
+	private static function link_fragment_from_href( string $href ): string {
+		$href = trim( wp_specialchars_decode( $href, ENT_QUOTES ) );
+		if ( '' === $href ) {
+			return '';
+		}
+
+		$hash = strpos( $href, '#' );
+		if ( false === $hash ) {
+			return '';
+		}
+
+		$fragment = substr( $href, $hash + 1 );
+		$fragment = preg_replace( '/[\x00-\x20\x7f]+/', '', $fragment );
+		$fragment = is_string( $fragment ) ? $fragment : '';
+		if ( '' === $fragment ) {
+			return '';
+		}
+
+		return $fragment;
+	}
+
+	/**
+	 * Normalize a stored rel attribute into a bounded token list.
+	 *
+	 * @param string $rel Raw rel attribute.
+	 */
+	private static function normalize_link_rel( string $rel ): string {
+		$rel = strtolower( trim( $rel ) );
+		if ( '' === $rel ) {
+			return '';
+		}
+
+		$tokens = preg_split( '/[\s,]+/', $rel );
+		if ( ! is_array( $tokens ) ) {
+			return '';
+		}
+
+		$normalized = array();
+		foreach ( $tokens as $token ) {
+			$token = trim( $token );
+			if ( '' === $token || ! preg_match( '/^[a-z][a-z0-9:_-]{0,31}$/', $token ) || in_array( $token, $normalized, true ) ) {
+				continue;
+			}
+
+			$normalized[] = $token;
+			if ( count( $normalized ) >= 8 ) {
+				break;
+			}
+		}
+
+		return implode( ' ', $normalized );
+	}
+
+	/**
+	 * Build the intent summary for one occurrence of one checked destination.
+	 *
+	 * @param array<string,mixed> $occurrence Prepared occurrence.
+	 * @param array<string,mixed> $check      Completed check.
+	 * @return array{code:string,severity:string,detail:string}
+	 */
+	private static function occurrence_intent_summary( array $occurrence, array $check ): array {
+		$intent = isset( $check['intent'] ) && is_array( $check['intent'] ) ? $check['intent'] : self::empty_intent_evidence();
+
+		$findings = self::page_intent_findings( $intent );
+
+		$fragment = isset( $occurrence['fragment'] ) ? (string) $occurrence['fragment'] : '';
+		if ( isset( $check['redirect_fragment'] ) ) {
+			$fragment = (string) $check['redirect_fragment'];
+		}
+		if ( '' !== $fragment ) {
+			$fragment_finding = self::fragment_intent_finding( $fragment, $intent );
+			if ( '' !== $fragment_finding['code'] ) {
+				$findings[] = $fragment_finding;
+			}
+		}
+
+		$link_finding = self::link_rel_intent_finding( isset( $occurrence['link']['rel'] ) ? (string) $occurrence['link']['rel'] : '' );
+		if ( '' !== $link_finding['code'] ) {
+			$findings[] = $link_finding;
+		}
+
+		return self::summarize_intent_findings( $findings );
+	}
+
+	/**
+	 * Derive page-level intent findings from one stored destination check.
+	 *
+	 * @param array<string,mixed> $intent Stored intent evidence.
+	 * @return array<int,array{code:string,severity:string,detail:string}>
+	 */
+	private static function page_intent_findings( array $intent ): array {
+		$findings = array();
+		if ( empty( $intent['checked'] ) ) {
+			return $findings;
+		}
+
+		$canonical_state = isset( $intent['canonical_state'] ) ? (string) $intent['canonical_state'] : '';
+		$canonical       = isset( $intent['canonical'] ) ? (string) $intent['canonical'] : '';
+		if ( 'differs' === $canonical_state ) {
+			$findings[] = array(
+				'code'     => 'canonical_differs',
+				'severity' => 'needs_review',
+				'detail'   => sprintf(
+					/* translators: %s: canonical URL declared by the linked page */
+					__( 'Canonical points to a different URL: %s', 'indexlane-redirect-internal-link-auditor' ),
+					self::truncate_text( $canonical, 500 )
+				),
+			);
+		} elseif ( 'offsite' === $canonical_state ) {
+			$findings[] = array(
+				'code'     => 'canonical_offsite',
+				'severity' => 'needs_review',
+				'detail'   => sprintf(
+					/* translators: %s: canonical URL declared by the linked page */
+					__( 'Canonical points to another site: %s', 'indexlane-redirect-internal-link-auditor' ),
+					self::truncate_text( $canonical, 500 )
+				),
+			);
+		} elseif ( 'invalid' === $canonical_state ) {
+			$findings[] = array(
+				'code'     => 'canonical_unreadable',
+				'severity' => 'info',
+				'detail'   => __( 'The canonical URL on this page could not be read.', 'indexlane-redirect-internal-link-auditor' ),
+			);
+		}
+
+		$header_noindex = ! empty( $intent['header_noindex'] );
+		$meta_noindex   = ! empty( $intent['meta_noindex'] );
+		if ( $header_noindex || $meta_noindex ) {
+			if ( $header_noindex && $meta_noindex ) {
+				$noindex_detail = __( 'The page is marked noindex in both the response header and the page.', 'indexlane-redirect-internal-link-auditor' );
+			} elseif ( $header_noindex ) {
+				$noindex_detail = __( 'The page sends noindex in the X-Robots-Tag response header.', 'indexlane-redirect-internal-link-auditor' );
+			} else {
+				$noindex_detail = __( 'The page contains a noindex robots meta tag.', 'indexlane-redirect-internal-link-auditor' );
+			}
+
+			$findings[] = array(
+				'code'     => 'noindex',
+				'severity' => 'needs_review',
+				'detail'   => $noindex_detail,
+			);
+		}
+
+		if ( ! empty( $intent['header_nofollow'] ) || ! empty( $intent['meta_nofollow'] ) ) {
+			$findings[] = array(
+				'code'     => 'page_nofollow',
+				'severity' => 'info',
+				'detail'   => __( 'The page tells search engines not to follow its links.', 'indexlane-redirect-internal-link-auditor' ),
+			);
+		}
+
+		$refresh = isset( $intent['meta_refresh'] ) ? (string) $intent['meta_refresh'] : '';
+		if ( '' !== $refresh ) {
+			$findings[] = array(
+				'code'     => 'meta_refresh',
+				'severity' => 'warning',
+				'detail'   => sprintf(
+					/* translators: %s: URL or value used by the page meta refresh */
+					__( 'The page redirects visitors with a meta refresh: %s', 'indexlane-redirect-internal-link-auditor' ),
+					self::truncate_text( $refresh, 500 )
+				),
+			);
+		}
+
+		$kind = isset( $intent['content_kind'] ) ? (string) $intent['content_kind'] : '';
+		if ( 'pdf' === $kind ) {
+			$findings[] = array(
+				'code'     => 'file_response',
+				'severity' => 'info',
+				'detail'   => __( 'This URL serves a PDF file instead of a page.', 'indexlane-redirect-internal-link-auditor' ),
+			);
+		} elseif ( 'image' === $kind ) {
+			$findings[] = array(
+				'code'     => 'file_response',
+				'severity' => 'info',
+				'detail'   => __( 'This URL serves an image file instead of a page.', 'indexlane-redirect-internal-link-auditor' ),
+			);
+		} elseif ( 'other' === $kind ) {
+			$findings[] = array(
+				'code'     => 'file_response',
+				'severity' => 'info',
+				'detail'   => sprintf(
+					/* translators: %s: response content type */
+					__( 'This URL serves %s instead of a page.', 'indexlane-redirect-internal-link-auditor' ),
+					self::truncate_text( isset( $intent['content_type'] ) ? (string) $intent['content_type'] : '', 200 )
+				),
+			);
+		}
+
+		return $findings;
+	}
+
+	/**
+	 * Judge one stored fragment against one stored destination check.
+	 *
+	 * @param string              $fragment Requested fragment.
+	 * @param array<string,mixed> $intent   Stored intent evidence.
+	 * @return array{code:string,severity:string,detail:string}
+	 */
+	private static function fragment_intent_finding( string $fragment, array $intent ): array {
+		$finding = self::empty_intent_summary();
+		$kind    = isset( $intent['content_kind'] ) ? (string) $intent['content_kind'] : '';
+		if ( empty( $intent['checked'] ) || ( 'html' !== $kind && '' !== $kind ) ) {
+			return $finding;
+		}
+
+		if ( 0 === strcasecmp( rawurldecode( $fragment ), 'top' ) ) {
+			return $finding;
+		}
+
+		$targets = isset( $intent['fragments'] ) && is_array( $intent['fragments'] ) ? $intent['fragments'] : array();
+		if ( self::fragment_target_exists( $fragment, $targets ) ) {
+			return $finding;
+		}
+
+		if ( empty( $intent['fragments_complete'] ) || strlen( rawurldecode( $fragment ) ) > self::MAX_INTENT_FRAGMENT_LENGTH || false !== strpos( $fragment, ':~:' ) ) {
+			return array(
+				'code'     => 'fragment_inconclusive',
+				'severity' => 'info',
+				'detail'   => sprintf(
+					/* translators: %s: fragment name from a link, including the leading hash */
+					__( 'The fragment %s could not be confirmed from the inspected HTML.', 'indexlane-redirect-internal-link-auditor' ),
+					self::truncate_text( '#' . $fragment, 200 )
+				),
+			);
+		}
+
+		return array(
+			'code'     => 'fragment_missing',
+			'severity' => 'warning',
+			'detail'   => sprintf(
+				/* translators: %s: fragment name from a link, including the leading hash */
+				__( 'The linked page does not contain the fragment %s.', 'indexlane-redirect-internal-link-auditor' ),
+				self::truncate_text( '#' . $fragment, 200 )
+			),
+		);
+	}
+
+	/**
+	 * Report an internal nofollow relationship as informational evidence.
+	 *
+	 * @param string $rel Stored rel attribute.
+	 * @return array{code:string,severity:string,detail:string}
+	 */
+	private static function link_rel_intent_finding( string $rel ): array {
+		$normalized = self::normalize_link_rel( $rel );
+		if ( '' === $normalized || false === strpos( ' ' . $normalized . ' ', ' nofollow ' ) ) {
+			return self::empty_intent_summary();
+		}
+
+		return array(
+			'code'     => 'internal_nofollow',
+			'severity' => 'info',
+			'detail'   => __( 'This internal link is stored with rel="nofollow".', 'indexlane-redirect-internal-link-auditor' ),
+		);
+	}
+
+	/**
+	 * Reduce several intent findings to one primary finding and one detail text.
+	 *
+	 * @param array<int,array<string,mixed>> $findings Intent findings.
+	 * @return array{code:string,severity:string,detail:string}
+	 */
+	private static function summarize_intent_findings( array $findings ): array {
+		$summary = self::empty_intent_summary();
+		$details = array();
+		$primary = null;
+
+		foreach ( $findings as $finding ) {
+			if ( ! is_array( $finding ) || empty( $finding['code'] ) ) {
+				continue;
+			}
+
+			$severity = isset( $finding['severity'] ) ? (string) $finding['severity'] : 'info';
+			$detail   = isset( $finding['detail'] ) ? trim( (string) $finding['detail'] ) : '';
+			if ( '' !== $detail && ! in_array( $detail, $details, true ) ) {
+				$details[] = $detail;
+			}
+
+			if ( null === $primary || self::intent_severity_rank( $severity ) > self::intent_severity_rank( (string) $primary['severity'] ) ) {
+				$primary = array(
+					'code'     => (string) $finding['code'],
+					'severity' => $severity,
+				);
+			}
+		}
+
+		if ( null === $primary ) {
+			return $summary;
+		}
+
+		$summary['code']     = (string) $primary['code'];
+		$summary['severity'] = (string) $primary['severity'];
+		$summary['detail']   = self::truncate_text( implode( '; ', $details ), self::MAX_INTENT_DETAIL_LENGTH );
+
+		return $summary;
+	}
+
+	/**
+	 * Rank intent severities from informational to most actionable.
+	 *
+	 * @param string $severity Intent severity.
+	 */
+	private static function intent_severity_rank( string $severity ): int {
+		$ranks = array(
+			''             => 0,
+			'info'         => 1,
+			'warning'      => 2,
+			'needs_review' => 3,
+		);
+
+		return isset( $ranks[ $severity ] ) ? $ranks[ $severity ] : 0;
+	}
+
+	/**
+	 * Merge destination-intent severity into a transport result code.
+	 *
+	 * Intent only upgrades a healthy response. A destination that already
+	 * redirects, is blocked, or is broken keeps the outcome its transport
+	 * evidence produced, and page intent is reported beside it.
+	 *
+	 * @param string $result_code Transport result code.
+	 * @param string $severity    Primary intent severity.
+	 */
+	private static function merge_intent_result_code( string $result_code, string $severity ): string {
+		if ( 'ok' !== $result_code ) {
+			return $result_code;
+		}
+
+		if ( 'needs_review' === $severity ) {
+			return 'needs_review';
+		}
+
+		if ( 'warning' === $severity ) {
+			return 'warning';
+		}
+
+		return $result_code;
+	}
+
+	/**
+	 * Cut one string to a byte budget without splitting a character.
+	 *
+	 * @param string $text           Text to cut.
+	 * @param int    $maximum_length Maximum byte length.
+	 */
+	private static function truncate_text( string $text, int $maximum_length ): string {
+		if ( $maximum_length <= 0 || strlen( $text ) <= $maximum_length ) {
+			return $text;
+		}
+
+		$text = substr( $text, 0, $maximum_length );
+		// Drop an incomplete trailing UTF-8 character without requiring mbstring.
+		return (string) preg_replace( '/[\xC0-\xFF][\x80-\xBF]*$/', '', $text );
 	}
 
 	/**

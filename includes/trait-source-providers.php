@@ -386,6 +386,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Source_Providers {
 				$links[] = array(
 					'href'   => $href,
 					'anchor' => self::normalize_anchor_text( $link['anchor'] ),
+					'rel'    => isset( $link['rel'] ) && is_string( $link['rel'] ) ? self::normalize_link_rel( $link['rel'] ) : '',
 				);
 			}
 		}
@@ -449,7 +450,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Source_Providers {
 	 * Get links retained directly by a source or encoded in stored block markup.
 	 *
 	 * @param array<string,mixed> $source Normalized source.
-	 * @return array<int,array{href:string,anchor:string}>
+	 * @return array<int,array{href:string,anchor:string,rel?:string}>
 	 */
 	private static function extract_source_links( array $source ): array {
 		if ( is_array( $source['links'] ) ) {
@@ -489,7 +490,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Source_Providers {
 	 * Extract URL attributes from stored self-closing link blocks.
 	 *
 	 * @param array<int,array<string,mixed>> $blocks Parsed blocks.
-	 * @return array<int,array{href:string,anchor:string}>
+	 * @return array<int,array{href:string,anchor:string,rel?:string}>
 	 */
 	private static function extract_navigation_attribute_links( array $blocks ): array {
 		$links       = array();
@@ -519,6 +520,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Source_Providers {
 						$links[] = array(
 							'href'   => $href,
 							'anchor' => self::normalize_anchor_text( $label ),
+							'rel'    => isset( $attrs['rel'] ) && is_string( $attrs['rel'] ) ? self::normalize_link_rel( $attrs['rel'] ) : '',
 						);
 					}
 				}
@@ -736,6 +738,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Source_Providers {
 			$links[] = array(
 				'href'   => $url,
 				'anchor' => isset( $item->title ) ? self::normalize_anchor_text( (string) $item->title ) : '',
+				'rel'    => isset( $item->xfn ) && is_string( $item->xfn ) ? self::normalize_link_rel( (string) $item->xfn ) : '',
 			);
 		}
 

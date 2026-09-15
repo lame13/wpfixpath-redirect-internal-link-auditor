@@ -11,7 +11,7 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 	/**
-	 * Group broken and redirected link occurrences by normalized destination.
+	 * Group broken, redirected, and intent-warning occurrences by destination.
 	 *
 	 * This is a read-only projection of completed result rows. It never issues
 	 * requests and therefore always represents the same scan as the detail view.
@@ -31,8 +31,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 			$result         = isset( $row['result'] ) ? trim( (string) $row['result'] ) : '';
 			$is_broken      = self::result_label_matches( $result, 'Error' ) || in_array( $final_status, array( 404, 410 ), true );
 			$is_redirected  = $redirect_count > 0 || ( $final_status >= 300 && $final_status < 400 );
+			$intent_severity = isset( $row['intent_severity'] ) ? trim( (string) $row['intent_severity'] ) : '';
+			$is_intent       = in_array( $intent_severity, array( 'warning', 'needs_review' ), true );
 
-			if ( ! $is_broken && ! $is_redirected ) {
+			if ( ! $is_broken && ! $is_redirected && ! $is_intent ) {
 				continue;
 			}
 
@@ -60,6 +62,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 					'max_redirect_count'     => 0,
 					'effective_final_urls'   => array(),
 					'warnings'               => array(),
+					'intent_severity'        => '',
+					'intent_codes'           => array(),
+					'intent_details'         => array(),
 				);
 			}
 
@@ -109,6 +114,21 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				$groups[ $group_key ]['warnings'][ trim( $warning ) ] = true;
 			}
 
+			if ( 'warning' === $intent_severity || 'needs_review' === $intent_severity ) {
+				if ( self::intent_severity_rank( $intent_severity ) > self::intent_severity_rank( $groups[ $group_key ]['intent_severity'] ) ) {
+					$groups[ $group_key ]['intent_severity'] = $intent_severity;
+				}
+			}
+
+			$intent_code   = isset( $row['intent_code'] ) ? trim( (string) $row['intent_code'] ) : '';
+			$intent_detail = isset( $row['intent_detail'] ) ? trim( (string) $row['intent_detail'] ) : '';
+			if ( '' !== $intent_code ) {
+				$groups[ $group_key ]['intent_codes'][ $intent_code ] = true;
+			}
+			if ( '' !== $intent_detail ) {
+				$groups[ $group_key ]['intent_details'][ $intent_detail ] = true;
+			}
+
 			$result_rank = self::result_impact_rank( $result );
 			if (
 				$result_rank > $groups[ $group_key ]['result_rank'] ||
@@ -124,10 +144,14 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 			$http_statuses = array_keys( $group['http_statuses'] );
 			$final_urls    = array_keys( $group['effective_final_urls'] );
 			$warnings      = array_keys( $group['warnings'] );
+			$intent_codes  = array_keys( $group['intent_codes'] );
+			$intent_details = array_keys( $group['intent_details'] );
 			$sources       = array_values( $group['sources'] );
 			sort( $http_statuses, SORT_STRING );
 			sort( $final_urls, SORT_STRING );
 			sort( $warnings, SORT_STRING );
+			sort( $intent_codes, SORT_STRING );
+			sort( $intent_details, SORT_STRING );
 			usort(
 				$sources,
 				static function ( array $left, array $right ): int {
@@ -144,8 +168,12 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				$impact = __( 'Broken/error after redirect', 'indexlane-redirect-internal-link-auditor' );
 			} elseif ( $group['has_broken'] ) {
 				$impact = __( 'Broken/error', 'indexlane-redirect-internal-link-auditor' );
-			} else {
+			} elseif ( $group['has_redirect'] ) {
 				$impact = __( 'Redirect', 'indexlane-redirect-internal-link-auditor' );
+			} elseif ( 'warning' === $group['intent_severity'] ) {
+				$impact = __( 'Responds with a warning', 'indexlane-redirect-internal-link-auditor' );
+			} else {
+				$impact = __( 'Responds, but needs review', 'indexlane-redirect-internal-link-auditor' );
 			}
 
 			$impact_rows[] = array(
@@ -160,6 +188,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				'max_redirect_count'    => $group['max_redirect_count'],
 				'effective_final_url'   => implode( ' | ', $final_urls ),
 				'warning_evidence'      => implode( ' | ', $warnings ),
+				'intent_code_evidence'  => implode( ' | ', $intent_codes ),
+				'intent_evidence'       => implode( ' | ', $intent_details ),
 			);
 		}
 
@@ -646,6 +676,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 					self::csv_safe( __( 'Maximum Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Final URLs', 'indexlane-redirect-internal-link-auditor' ) ),
 					self::csv_safe( __( 'Warnings', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Intent', 'indexlane-redirect-internal-link-auditor' ) ),
+					self::csv_safe( __( 'Intent Details', 'indexlane-redirect-internal-link-auditor' ) ),
 				),
 			);
 
@@ -679,6 +711,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 					self::csv_safe( (string) $row['max_redirect_count'] ),
 					self::csv_safe( (string) $row['effective_final_url'] ),
 					self::csv_safe( (string) $row['warning_evidence'] ),
+					self::csv_safe( (string) $row['intent_code_evidence'] ),
+					self::csv_safe( (string) $row['intent_evidence'] ),
 				);
 			}
 
@@ -697,6 +731,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				self::csv_safe( __( 'Redirects', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Warning', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Intent', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Intent Details', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Link Text', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 			),
@@ -714,6 +750,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 				self::csv_safe( (string) $row['redirect_count'] ),
 				self::csv_safe( (string) $row['final_url'] ),
 				self::csv_safe( (string) $row['warning'] ),
+				self::csv_safe( isset( $row['intent_code'] ) ? (string) $row['intent_code'] : '' ),
+				self::csv_safe( isset( $row['intent_detail'] ) ? (string) $row['intent_detail'] : '' ),
 				self::csv_safe( (string) $row['anchor_text'] ),
 				self::csv_safe( (string) $row['result'] ),
 			);

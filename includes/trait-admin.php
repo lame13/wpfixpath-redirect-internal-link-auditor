@@ -871,58 +871,80 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			<?php else : ?>
 				<?php self::render_destination_impact( $impact_rows ); ?>
 
-				<h2><?php esc_html_e( 'Link details', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
-				<p class="description">
-					<?php esc_html_e( 'Use this full list when you need the exact editable source, linked URL, link text, and HTTP result.', 'indexlane-redirect-internal-link-auditor' ); ?>
-				</p>
-				<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Link details', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
-				<table class="widefat striped indexlane-rila-occurrence-table">
-					<thead>
-						<tr>
-							<th><?php esc_html_e( 'Source', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Surface', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Scope', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'HTTP status', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Redirects', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Final URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Warning', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Link text', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-							<th><?php esc_html_e( 'Outcome', 'indexlane-redirect-internal-link-auditor' ); ?></th>
-						</tr>
-					</thead>
-					<tbody>
-						<?php foreach ( $results as $row ) : ?>
-							<tr>
-								<td>
-									<?php if ( ! empty( $row['source_edit_url'] ) ) : ?>
-										<a href="<?php echo esc_url( $row['source_edit_url'] ); ?>"><?php echo esc_html( $row['source_title'] ); ?></a>
-									<?php else : ?>
-										<?php echo esc_html( $row['source_title'] ); ?>
-									<?php endif; ?>
-									<?php if ( ! empty( $row['source_url'] ) ) : ?>
-										<a class="indexlane-rila-target-url" href="<?php echo esc_url( $row['source_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['source_url'] ); ?></a>
-									<?php endif; ?>
-								</td>
-								<td><?php echo esc_html( $row['source_type'] ); ?></td>
-								<td><?php echo esc_html( self::source_context_label( isset( $row['source_context'] ) ? (string) $row['source_context'] : 'contextual' ) ); ?></td>
-								<td><a href="<?php echo esc_url( $row['linked_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['linked_url'] ); ?></a></td>
-								<td><?php echo esc_html( $row['http_status'] ); ?></td>
-								<td><?php echo esc_html( (string) $row['redirect_count'] ); ?></td>
-								<td>
-									<?php if ( ! empty( $row['final_url'] ) ) : ?>
-										<a href="<?php echo esc_url( $row['final_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['final_url'] ); ?></a>
-									<?php endif; ?>
-								</td>
-								<td><?php echo esc_html( $row['warning'] ); ?></td>
-								<td><?php echo esc_html( $row['anchor_text'] ); ?></td>
-								<td><?php echo esc_html( $row['result'] ); ?></td>
-							</tr>
-						<?php endforeach; ?>
-					</tbody>
-				</table>
-				</div>
+				<?php self::render_occurrence_details( $results ); ?>
 			<?php endif; ?>
+		</div>
+		<?php
+	}
+
+	/**
+	 * Render every stored occurrence with its transport and intent evidence.
+	 *
+	 * @param array<int,array<string,mixed>> $results Result rows.
+	 */
+	private static function render_occurrence_details( array $results ): void {
+		?>
+		<h2><?php esc_html_e( 'Link details', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
+		<p class="description">
+			<?php esc_html_e( 'Use this full list when you need the exact editable source, linked URL, link text, HTTP result, and page intent.', 'indexlane-redirect-internal-link-auditor' ); ?>
+		</p>
+		<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Link details', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
+		<table class="widefat striped indexlane-rila-occurrence-table">
+			<thead>
+				<tr>
+					<th><?php esc_html_e( 'Source', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Surface', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Scope', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Linked URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'HTTP status', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Redirects', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Final URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Page intent', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Warning', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Link text', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Outcome', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+				</tr>
+			</thead>
+			<tbody>
+				<?php foreach ( $results as $row ) : ?>
+					<tr>
+						<td>
+							<?php if ( ! empty( $row['source_edit_url'] ) ) : ?>
+								<a href="<?php echo esc_url( $row['source_edit_url'] ); ?>"><?php echo esc_html( $row['source_title'] ); ?></a>
+							<?php else : ?>
+								<?php echo esc_html( $row['source_title'] ); ?>
+							<?php endif; ?>
+							<?php if ( ! empty( $row['source_url'] ) ) : ?>
+								<a class="indexlane-rila-target-url" href="<?php echo esc_url( $row['source_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['source_url'] ); ?></a>
+							<?php endif; ?>
+						</td>
+						<td><?php echo esc_html( $row['source_type'] ); ?></td>
+						<td><?php echo esc_html( self::source_context_label( isset( $row['source_context'] ) ? (string) $row['source_context'] : 'contextual' ) ); ?></td>
+						<td><a href="<?php echo esc_url( $row['linked_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['linked_url'] ); ?></a></td>
+						<td><?php echo esc_html( $row['http_status'] ); ?></td>
+						<td><?php echo esc_html( (string) $row['redirect_count'] ); ?></td>
+						<td>
+							<?php if ( ! empty( $row['final_url'] ) ) : ?>
+								<a href="<?php echo esc_url( $row['final_url'] ); ?>" target="_blank" rel="noopener noreferrer"><?php echo esc_html( $row['final_url'] ); ?></a>
+							<?php endif; ?>
+						</td>
+						<td>
+							<?php
+							$intent_detail = isset( $row['intent_detail'] ) ? trim( (string) $row['intent_detail'] ) : '';
+							if ( '' === $intent_detail ) {
+								esc_html_e( 'None', 'indexlane-redirect-internal-link-auditor' );
+							} else {
+								echo esc_html( $intent_detail );
+							}
+							?>
+						</td>
+						<td><?php echo esc_html( $row['warning'] ); ?></td>
+						<td><?php echo esc_html( $row['anchor_text'] ); ?></td>
+						<td><?php echo esc_html( $row['result'] ); ?></td>
+					</tr>
+				<?php endforeach; ?>
+			</tbody>
+		</table>
 		</div>
 		<?php
 	}
@@ -937,7 +959,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		?>
 		<section id="indexlane-rila-comparison" class="indexlane-rila-comparison" aria-labelledby="indexlane-rila-comparison-heading">
 			<h2 id="indexlane-rila-comparison-heading"><?php esc_html_e( 'What changed since the saved scan', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
-			<p class="description"><?php esc_html_e( 'Each row compares the saved scan with the latest scan. Open technical details for the HTTP and redirect results.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+			<p class="description"><?php esc_html_e( 'Each row compares the saved scan with the latest scan. Open technical details for the HTTP, redirect, and page-intent results.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 
 			<div class="indexlane-rila-comparison-summary">
 				<div class="is-new"><strong><?php echo esc_html( (string) $summary['new'] ); ?></strong><span><?php esc_html_e( 'New issues', 'indexlane-redirect-internal-link-auditor' ); ?></span></div>
@@ -983,6 +1005,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 										<div><dt><?php esc_html_e( 'HTTP status', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php self::render_comparison_value( $row['old'], $row['new'], 'http_status_chain' ); ?></dd></div>
 										<div><dt><?php esc_html_e( 'Redirects', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php self::render_comparison_value( $row['old'], $row['new'], 'redirect_count' ); ?></dd></div>
 										<div><dt><?php esc_html_e( 'Final URL', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php self::render_comparison_value( $row['old'], $row['new'], 'final_url' ); ?></dd></div>
+										<div><dt><?php esc_html_e( 'Page intent', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php self::render_comparison_value( $row['old'], $row['new'], 'intent_detail' ); ?></dd></div>
 										<div><dt><?php esc_html_e( 'Outcome', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php self::render_comparison_value( $row['old'], $row['new'], 'result_severity' ); ?></dd></div>
 										<div><dt><?php esc_html_e( 'Times linked', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php self::render_comparison_value( $row['old'], $row['new'], 'occurrence_count' ); ?></dd></div>
 									</dl>
@@ -1046,11 +1069,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		?>
 		<h2><?php esc_html_e( 'Problem URLs', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 		<p class="description">
-			<?php esc_html_e( 'Broken and redirected URLs are grouped so you can see the problem and how widely it appears.', 'indexlane-redirect-internal-link-auditor' ); ?>
+			<?php esc_html_e( 'Broken, redirected, and responding URLs that need attention are grouped with their editing locations.', 'indexlane-redirect-internal-link-auditor' ); ?>
 		</p>
 
 		<?php if ( empty( $impact_rows ) ) : ?>
-			<p><?php esc_html_e( 'No broken or redirected URLs were found.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+			<p><?php esc_html_e( 'No broken URLs, redirects, or page-intent issues were found.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 			<?php return; ?>
 		<?php endif; ?>
 
@@ -1088,6 +1111,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 									<div><dt><?php esc_html_e( 'Maximum redirects', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( (string) $row['max_redirect_count'] ); ?></dd></div>
 									<div><dt><?php esc_html_e( 'Final URLs', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( $row['effective_final_url'] ); ?></dd></div>
 									<div><dt><?php esc_html_e( 'Warnings', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( $row['warning_evidence'] ); ?></dd></div>
+									<div><dt><?php esc_html_e( 'Page intent', 'indexlane-redirect-internal-link-auditor' ); ?></dt><dd><?php echo esc_html( '' !== (string) $row['intent_evidence'] ? (string) $row['intent_evidence'] : __( 'None', 'indexlane-redirect-internal-link-auditor' ) ); ?></dd></div>
 								</dl>
 							</details>
 						</td>

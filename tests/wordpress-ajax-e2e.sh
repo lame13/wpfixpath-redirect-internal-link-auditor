@@ -269,7 +269,7 @@ grep -Fqi -- 'content-type: application/json' "${baseline_headers}"
 grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-saved-scan-' "${baseline_headers}"
 php -r '
 	$data = json_decode(file_get_contents($argv[1]), true);
-	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 2 || $data["plugin_version"] !== "0.6.1") {
+	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 3 || $data["plugin_version"] !== "0.7.0") {
 		fwrite(STDERR, "Exported baseline metadata is invalid.\n");
 		exit(1);
 	}

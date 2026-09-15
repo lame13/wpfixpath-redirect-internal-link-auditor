@@ -2,7 +2,7 @@
 
 Use IndexLane after changing page URLs, moving a WordPress site, or taking over its maintenance. This walkthrough uses a small **demo site**, with fictional content and results from an actual plugin scan.
 
-The demo has a **Footer links** menu pointing to a missing `/retired-contact/` page. Its **About** page also links to `/old-services/`, which redirects to `/services/`.
+The demo has a **Footer links** menu pointing to a missing `/retired-contact/` page. Its **About** page also links to `/old-services/`, which redirects to `/services/`. A second About link points to `/services/#enterprise`, but that section is missing from the served page.
 
 ## 1. Scan the areas you maintain
 
@@ -18,13 +18,17 @@ For a migration check, enter the old domains you want flagged. Links to those do
 
 ## 2. Find the editing location
 
-Scroll to **Problem URLs**. This groups broken and redirected destinations, shows how widely each appears, and links to the source under **Where it appears**. Expand **View affected sources** when more than one source is listed.
+Scroll to **Problem URLs**. This groups broken, redirected, and responding destinations needing attention, shows how widely each appears, and links to the source under **Where it appears**. Expand **View affected sources** when more than one source is listed.
 
 In the demo, `/retired-contact/` returns `404`, and its editing link opens the **Footer links** menu. `/old-services/` returns `301 → 200` and can be updated in **About**.
 
 ![The broken contact URL points to its Footer links menu; the redirected service URL points to About.](../assets/screenshot-1.png)
 
-**Link details** contains the full occurrence list, including the original URL, link text, HTTP result, and editing location. **Content link coverage** shows detected incoming links from the selected sources. An empty incoming-link count describes this scan's coverage only.
+**Link details** contains the full occurrence list, including the original URL, link text, HTTP result, page intent, and editing location. A missing `#enterprise` target produces a warning even though `/services/` returns `200`.
+
+![Link details shows the Page intent column and the original linked fragment.](../assets/screenshot-4.png)
+
+**Content link coverage** shows detected incoming links from the selected sources. An empty incoming-link count describes this scan's coverage only.
 
 ## 3. Save the results before editing
 
@@ -47,7 +51,7 @@ Return to the auditor and select **Check fixes against saved scan**. This uses t
 Under **What changed since the saved scan**, the demo now shows:
 
 - **Resolved:** the broken `/retired-contact/` link is no longer present in the scanned sources.
-- **Still present:** the About page still links through `/old-services/`.
+- **Still present:** the About page still links through `/old-services/` and to the missing `/services/#enterprise` section.
 - **No new issues:** this scan did not find an additional issue in the selected scope.
 
 ![The comparison shows the footer link resolved and the old service URL still present.](../assets/screenshot-2.png)

@@ -35,7 +35,7 @@ update_option( 'blogname', 'IndexLane Demo Site' );
 update_option( 'blogdescription', 'Fictional content for the IndexLane walkthrough.' );
 
 $page_content = array(
-	'about'    => '<p>Find out about <a href="' . esc_url( home_url( '/old-services/' ) ) . '">our services</a> or <a href="' . esc_url( home_url( '/contact/' ) ) . '">contact us</a>.</p>',
+	'about'    => '<p>Find out about <a href="' . esc_url( home_url( '/old-services/' ) ) . '">our services</a>, read about <a href="' . esc_url( home_url( '/services/#enterprise' ) ) . '">enterprise services</a>, or <a href="' . esc_url( home_url( '/contact/' ) ) . '">contact us</a>.</p>',
 	'services' => '<p>Learn more <a href="' . esc_url( home_url( '/about/' ) ) . '">about us</a> and <a href="' . esc_url( home_url( '/contact/' ) ) . '">get in touch</a>.</p>',
 	'contact'  => '<p>Ask about <a href="' . esc_url( home_url( '/services/' ) ) . '">our services</a>.</p>',
 );

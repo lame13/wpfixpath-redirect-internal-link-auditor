@@ -184,11 +184,32 @@ function _n( string $single, string $plural, int $number, string $domain = 'defa
 function is_wp_error( $value ): bool {
 	return $value instanceof WP_Error;
 }
+function esc_html( $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+function esc_attr( $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+function esc_url( $url ): string {
+	return (string) $url;
+}
+function esc_html__( string $text, string $domain = 'default' ): string {
+	return esc_html( __( $text ) );
+}
+function esc_html_e( string $text, string $domain = 'default' ): void {
+	echo esc_html( __( $text ) );
+}
+function esc_attr_e( string $text, string $domain = 'default' ): void {
+	echo esc_attr( __( $text ) );
+}
 function wp_remote_retrieve_response_code( $response ): int {
 	return isset( $response['response']['code'] ) ? (int) $response['response']['code'] : 0;
 }
 function wp_remote_retrieve_header( $response, string $name ) {
 	return isset( $response['headers'][ strtolower( $name ) ] ) ? $response['headers'][ strtolower( $name ) ] : '';
+}
+function wp_remote_retrieve_body( $response ): string {
+	return isset( $response['body'] ) && is_string( $response['body'] ) ? $response['body'] : '';
 }
 function esc_url_raw( string $url ): string {
 	return filter_var( $url, FILTER_VALIDATE_URL ) ? $url : '';
@@ -304,12 +325,32 @@ indexlane_assert_same( $release_version, (string) $stable_tag_match[1], 'The Wor
 indexlane_assert_same( $release_version, (string) $changelog_version_match[1], 'The latest root changelog entry must match the plugin header.' );
 indexlane_assert_same( $release_version, (string) $readme_changelog_version_match[1], 'The latest WordPress.org changelog entry must match the plugin header.' );
 
-function indexlane_response( int $status, string $location = '' ): array {
+function indexlane_response( int $status, string $location = '', string $body = '', array $headers = array() ): array {
+	$response_headers = array();
+	foreach ( $headers as $name => $value ) {
+		$response_headers[ strtolower( (string) $name ) ] = $value;
+	}
+	if ( '' !== $location ) {
+		$response_headers['location'] = $location;
+	}
+
 	return array(
 		'response' => array( 'code' => $status ),
-		'headers'  => '' === $location ? array() : array( 'location' => $location ),
-		'body'     => '',
+		'headers'  => $response_headers,
+		'body'     => $body,
 	);
+}
+
+/**
+ * Build an HTML response for destination-intent coverage.
+ *
+ * @param string               $body    Response body.
+ * @param array<string,string> $headers Extra response headers.
+ */
+function indexlane_html_response( string $body, array $headers = array() ): array {
+	$headers = array_merge( array( 'content-type' => 'text/html; charset=UTF-8' ), $headers );
+
+	return indexlane_response( 200, '', $body, $headers );
 }
 
 indexlane_assert_same( true, isset( $GLOBALS['indexlane_test_actions']['admin_menu'] ), 'The Tools page must be registered on admin_menu.' );
@@ -414,8 +455,12 @@ function indexlane_result_row(
 			'final_url'       => $final_url,
 			'warning'         => $warning,
 			'anchor_text'     => $anchor_text,
+			'link_rel'        => '',
 			'result'          => $result,
 			'result_code'     => $result_code,
+			'intent_code'     => '',
+			'intent_severity' => '',
+			'intent_detail'   => '',
 			'is_same_site'    => true,
 			'direct_target_id' => 0,
 			'final_target_id'  => 0,
@@ -477,9 +522,9 @@ $attribute_links = indexlane_invoke(
 );
 indexlane_assert_same(
 	array(
-		array( 'href' => '/stored-navigation', 'anchor' => 'Stored navigation' ),
-		array( 'href' => '/parent', 'anchor' => 'Parent' ),
-		array( 'href' => '/child', 'anchor' => 'Child' ),
+		array( 'href' => '/stored-navigation', 'anchor' => 'Stored navigation', 'rel' => '' ),
+		array( 'href' => '/parent', 'anchor' => 'Parent', 'rel' => '' ),
+		array( 'href' => '/child', 'anchor' => 'Child', 'rel' => '' ),
 	),
 	$attribute_links,
 	'Self-closing Navigation blocks must retain stored URLs without duplicating links already present in serialized markup.'
@@ -824,7 +869,7 @@ $details_csv = indexlane_invoke(
 );
 indexlane_assert_same( 'Source', $details_csv[0][0], 'Detailed CSV should begin with the editable source.' );
 indexlane_assert_same( '\' =HYPERLINK("https://attacker.test")', $details_csv[1][0], 'CSV safety should block formulas after leading spaces.' );
-indexlane_assert_same( "'\n+SUM(1,1)", $details_csv[1][10], 'CSV safety should block formulas after leading newlines.' );
+indexlane_assert_same( "'\n+SUM(1,1)", $details_csv[1][12], 'CSV safety should block formulas after leading newlines.' );
 
 $impact_csv_input = array(
 	indexlane_result_row(
@@ -1079,7 +1124,7 @@ $comparison_csv = indexlane_invoke( 'build_comparison_csv_rows', array( $compari
 indexlane_assert_same( 7, count( $comparison_csv ), 'Comparison CSV must contain every compared issue destination plus its header.' );
 indexlane_assert_same( 'Outcome', $comparison_csv[0][0], 'Comparison CSV must begin with its outcome.' );
 indexlane_assert_same( 'Saved Scan HTTP Status Chain', $comparison_csv[0][4], 'Comparison CSV must expose saved-scan status results explicitly.' );
-indexlane_assert_same( 'Latest Scan Editable Sources Affected', $comparison_csv[0][15], 'Comparison CSV must expose latest-scan source impact explicitly.' );
+indexlane_assert_same( 'Latest Scan Editable Sources Affected', $comparison_csv[0][19], 'Comparison CSV must expose latest-scan source impact explicitly.' );
 
 $baseline_content_items = array(
 	array(
@@ -1108,7 +1153,7 @@ $baseline_stats = array(
 	'actionable_issues'           => 7,
 );
 $baseline_session = array(
-	'schema_version'              => 4,
+	'schema_version'              => 5,
 	'id'                          => '12345678-1234-4abc-8def-000000000050',
 	'status'                      => 'complete',
 	'created_at'                  => time() - 60,
@@ -1144,8 +1189,8 @@ $baseline_session = array(
 $baseline = indexlane_invoke( 'build_baseline_from_session', array( $baseline_session ) );
 indexlane_assert_same( false, is_wp_error( $baseline ), 'A complete consistent scan must produce portable baseline evidence.' );
 indexlane_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'Baseline JSON must identify its document format.' );
-indexlane_assert_same( 2, $baseline['schema_version'], 'Baseline JSON must carry an explicit source-aware schema version.' );
-indexlane_assert_same( '0.6.1', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
+indexlane_assert_same( 3, $baseline['schema_version'], 'Baseline JSON must carry an explicit destination-intent schema version.' );
+indexlane_assert_same( '0.7.0', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
 indexlane_assert_same( 'https://example.test', $baseline['site_url'], 'Baseline site ownership must use a normalized exact home URL.' );
 indexlane_assert_same( true, $baseline['completion']['complete'], 'Only complete evidence may be saved as a baseline.' );
 indexlane_assert_same( 0, $baseline['completion']['request_allowance_extensions'], 'Baseline metadata must preserve the request-limit extension state.' );
@@ -1166,14 +1211,26 @@ $legacy_baseline['scope'] = array(
 $legacy_baseline['completion']['content_done'] = $legacy_baseline['completion']['sources_done'];
 unset( $legacy_baseline['completion']['sources_done'], $legacy_baseline['stats']['sources_processed'] );
 foreach ( $legacy_baseline['results'] as &$legacy_row ) {
-	unset( $legacy_row['source_key'], $legacy_row['source_type_code'], $legacy_row['source_context'], $legacy_row['source_content_id'] );
+	unset( $legacy_row['source_key'], $legacy_row['source_type_code'], $legacy_row['source_context'], $legacy_row['source_content_id'], $legacy_row['link_rel'], $legacy_row['intent_code'], $legacy_row['intent_severity'], $legacy_row['intent_detail'] );
 }
 unset( $legacy_row );
 $upgraded_legacy = indexlane_invoke( 'validate_baseline', array( $legacy_baseline, true ) );
 indexlane_assert_same( false, is_wp_error( $upgraded_legacy ), 'Strict 0.5 saved scans must remain importable as content-only evidence.' );
-indexlane_assert_same( 2, $upgraded_legacy['schema_version'], 'A legacy saved scan must normalize to the source-aware schema.' );
+indexlane_assert_same( 3, $upgraded_legacy['schema_version'], 'A legacy saved scan must normalize to the current schema.' );
 indexlane_assert_same( array( 'content' ), $upgraded_legacy['settings']['source_types'], 'Legacy scans must retain their exact post-content-only scope.' );
 indexlane_assert_same( 'contextual', $upgraded_legacy['results'][0]['source_context'], 'Legacy occurrences must normalize as contextual content sources.' );
+indexlane_assert_same( '', $upgraded_legacy['results'][0]['intent_code'], 'Legacy occurrences must carry no invented destination-intent finding.' );
+
+$source_aware_baseline                   = $baseline;
+$source_aware_baseline['schema_version'] = 2;
+foreach ( $source_aware_baseline['results'] as &$source_aware_row ) {
+	unset( $source_aware_row['link_rel'], $source_aware_row['intent_code'], $source_aware_row['intent_severity'], $source_aware_row['intent_detail'] );
+}
+unset( $source_aware_row );
+$upgraded_source_aware = indexlane_invoke( 'validate_baseline', array( $source_aware_baseline, true ) );
+indexlane_assert_same( false, is_wp_error( $upgraded_source_aware ), 'Strict 0.6 saved scans must remain importable as transport-only evidence.' );
+indexlane_assert_same( 3, $upgraded_source_aware['schema_version'], 'A source-aware saved scan must normalize to the destination-intent schema.' );
+indexlane_assert_same( '', $upgraded_source_aware['results'][0]['intent_detail'], 'An upgraded 0.6 saved scan must record no destination-intent finding.' );
 
 $wrong_site             = $baseline;
 $wrong_site['site_url'] = 'https://other.example';
@@ -1233,7 +1290,11 @@ indexlane_assert_same( 2, $request_count, 'Every redirect hop should consume exa
 indexlane_assert_same( 2, count( $GLOBALS['indexlane_test_http_calls'] ), 'Each budget unit should map to one HTTP API call.' );
 indexlane_assert_same( 0, $GLOBALS['indexlane_test_http_calls'][0]['args']['redirection'], 'WordPress must not follow redirects outside the audited redirect loop.' );
 indexlane_assert_same( true, $GLOBALS['indexlane_test_http_calls'][0]['args']['reject_unsafe_urls'], 'Requests must use unsafe-URL rejection.' );
-indexlane_assert_same( 4096, $GLOBALS['indexlane_test_http_calls'][0]['args']['limit_response_size'], 'GET response bodies must be bounded.' );
+indexlane_assert_same(
+	262144,
+	$GLOBALS['indexlane_test_http_calls'][0]['args']['limit_response_size'],
+	'GET response bodies must be bounded but large enough to inspect page intent.'
+);
 
 $GLOBALS['indexlane_test_http_calls'] = array();
 $GLOBALS['indexlane_test_responses']  = array(
@@ -1268,6 +1329,7 @@ $occurrence     = array(
 	'warnings'   => array(),
 	'is_old'     => false,
 	'is_staging' => false,
+	'fragment'   => '',
 );
 
 for ( $i = 1; $i <= 6; $i++ ) {
@@ -1281,7 +1343,7 @@ for ( $i = 1; $i <= 6; $i++ ) {
 }
 
 $batch_session = array(
-	'schema_version'   => 4,
+	'schema_version'   => 5,
 	'id'               => '12345678-1234-4abc-8def-000000000010',
 	'scan_mode'        => 'standard',
 	'baseline_id'      => '',
@@ -1340,5 +1402,369 @@ $GLOBALS['indexlane_test_transients'][ $session_key ]['value']['expires_at'] = t
 $expired_session = indexlane_invoke( 'get_scan_session' );
 indexlane_assert_same( null, $expired_session, 'Explicitly expired abandoned sessions must be rejected.' );
 indexlane_assert_same( false, isset( $GLOBALS['indexlane_test_transients'][ $session_key ] ), 'Expired abandoned sessions must be cleaned up on access.' );
+
+$GLOBALS['indexlane_test_http_calls'] = array();
+
+$intent_source = array(
+	'id'         => 3,
+	'key'        => 'content:page:3',
+	'content_id' => 3,
+	'title'      => 'Service page',
+	'type'       => 'Page',
+	'type_code'  => 'content',
+	'context'    => 'contextual',
+	'url'        => 'https://example.test/service',
+	'base_url'   => 'https://example.test/service',
+	'edit_url'   => 'https://example.test/wp-admin/post.php?post=3&action=edit',
+);
+
+/**
+ * Build one prepared occurrence for destination-intent coverage.
+ *
+ * @param array<string,mixed> $source     Normalized stored source.
+ * @param string              $linked_url Linked URL.
+ * @param string              $fragment   Fragment from the stored link.
+ * @param string              $rel        Stored rel attribute.
+ */
+function indexlane_intent_occurrence( array $source, string $linked_url, string $fragment = '', string $rel = '' ): array {
+	return array(
+		'source'     => $source,
+		'link'       => array( 'href' => $linked_url, 'anchor' => 'Service', 'rel' => $rel ),
+		'linked_url' => $linked_url,
+		'warnings'   => array(),
+		'is_old'     => false,
+		'is_staging' => false,
+		'fragment'   => $fragment,
+	);
+}
+
+/**
+ * Wrap inspected intent evidence in the completed-check contract.
+ *
+ * @param string              $url    Final URL.
+ * @param array<string,mixed> $intent Inspected intent evidence.
+ * @param int                 $status Final HTTP status.
+ */
+function indexlane_intent_check( string $url, array $intent, int $status = 200 ): array {
+	return array(
+		'ok'                     => true,
+		'error'                  => '',
+		'statuses'               => array( (string) $status ),
+		'redirect_count'         => 0,
+		'redirect_codes'         => array(),
+		'final_status'           => $status,
+		'final_url'              => $url,
+		'redirect_limit_reached' => false,
+		'redirect_loop'          => false,
+		'redirect_left_site'     => false,
+		'intent'                 => $intent,
+		'budget_exhausted'       => false,
+	);
+}
+
+indexlane_assert_same( 'enterprise', indexlane_invoke( 'link_fragment_from_href', array( '/pricing/#enterprise' ) ), 'A stored link fragment must be retained for intent evidence.' );
+indexlane_assert_same( '', indexlane_invoke( 'link_fragment_from_href', array( '/pricing/' ) ), 'A link without a fragment must carry no fragment evidence.' );
+indexlane_assert_same( 'nofollow noopener', indexlane_invoke( 'normalize_link_rel', array( 'NoFollow, noopener nofollow' ) ), 'Stored rel evidence must be normalized into unique lowercase tokens.' );
+
+$GLOBALS['indexlane_test_responses'] = array(
+	'https://example.test/ok-page' => indexlane_html_response(
+		'<html><head><link rel="canonical" href="https://example.test/ok-page"><meta name="robots" content="index, follow"></head><body><h2 id="details">Details</h2><a name="legacy">Legacy anchor</a></body></html>'
+	),
+);
+$clean_request_count = 0;
+$clean_check         = indexlane_invoke( 'check_url', array( 'https://example.test/ok-page', 2.0, 5, &$clean_request_count ) );
+indexlane_assert_same( true, $clean_check['intent']['checked'], 'A 2xx same-site response must be inspected for destination intent.' );
+indexlane_assert_same( 'html', $clean_check['intent']['content_kind'], 'An HTML response must be classified as a page.' );
+indexlane_assert_same( 'same', $clean_check['intent']['canonical_state'], 'A canonical that matches the fetched URL must be recorded as matching.' );
+indexlane_assert_same( false, $clean_check['intent']['header_noindex'], 'A response without a robots header must not claim noindex.' );
+indexlane_assert_same( array( 'details', 'legacy' ), $clean_check['intent']['fragments'], 'An inspected page must retain its fragment targets.' );
+indexlane_assert_same( true, $clean_check['intent']['fragments_complete'], 'A fully inspected page must report complete fragment evidence.' );
+indexlane_assert_same( 1, $clean_request_count, 'Destination-intent inspection must not add an outbound request.' );
+
+$clean_row = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/ok-page', 'details' ), $clean_check ) );
+indexlane_assert_same( '', $clean_row['intent_code'], 'A page with matching intent must not create an intent finding.' );
+indexlane_assert_same( 'ok', $clean_row['result_code'], 'A matching canonical and existing fragment must remain OK.' );
+
+// Regression coverage for exact HTML evidence and conservative fragment checks.
+$literal_html = '<!-- <meta name="robots" content="noindex"><div id="comment"> -->'
+	. '<script>const example = \'<link rel="canonical" href="/wrong"><div id="script">\';</script>'
+	. '<textarea><meta name="robots" content="none"></textarea>'
+	. '<div title=\'id="attribute" <meta name="robots" content="none">\'>id="text"</div>'
+	. '<h2 title="1 > 0" id="123">Numbers</h2><a data-name="fake" name="Legacy">Anchor</a>';
+$literal_evidence = indexlane_invoke( 'inspect_response_intent', array( indexlane_html_response( $literal_html ), 'https://example.test/ok-page' ) );
+indexlane_assert_same( false, $literal_evidence['meta_noindex'], 'Comments, scripts, textareas, and quoted markup must not become robots evidence.' );
+indexlane_assert_same( '', $literal_evidence['canonical_state'], 'A canonical example in a script must not be treated as an actual canonical.' );
+indexlane_assert_same( array( '123', 'Legacy' ), $literal_evidence['fragments'], 'Only real fragment attributes must be retained, including numeric IDs.' );
+indexlane_assert_same( '', indexlane_invoke( 'fragment_intent_finding', array( '123', $literal_evidence ) )['code'], 'Numeric fragment IDs must match.' );
+indexlane_assert_same( 'fragment_missing', indexlane_invoke( 'fragment_intent_finding', array( 'legacy', $literal_evidence ) )['code'], 'Fragment names are case-sensitive.' );
+indexlane_assert_same( '', indexlane_invoke( 'fragment_intent_finding', array( 'TOP', $literal_evidence ) )['code'], 'The browser top-of-page fragment does not require an ID.' );
+indexlane_assert_same( 'fragment_inconclusive', indexlane_invoke( 'fragment_intent_finding', array( ':~:text=Numbers', $literal_evidence ) )['code'], 'Text fragments must not be reported as missing element IDs.' );
+$many_targets = '<h2 id="first">First</h2>';
+for ( $target_number = 0; $target_number < 100; $target_number++ ) {
+	$many_targets .= '<p id="item-' . $target_number . '">Item</p>';
+}
+$many_evidence = indexlane_invoke( 'inspect_response_intent', array( indexlane_html_response( $many_targets ), 'https://example.test/ok-page' ) );
+indexlane_assert_same( '', indexlane_invoke( 'fragment_intent_finding', array( 'first', $many_evidence ) )['code'], 'Known targets must still match when the target inventory is capped.' );
+indexlane_assert_same( 'fragment_inconclusive', indexlane_invoke( 'fragment_intent_finding', array( 'item-99', $many_evidence ) )['code'], 'A target outside the inventory cap must be inconclusive.' );
+$long_target = str_repeat( 'a', 200 ) . 'b';
+$long_evidence = indexlane_invoke( 'inspect_response_intent', array( indexlane_html_response( '<p id="' . $long_target . '">Long</p>' ), 'https://example.test/ok-page' ) );
+indexlane_assert_same( 'fragment_inconclusive', indexlane_invoke( 'fragment_intent_finding', array( str_repeat( 'a', 200 ), $long_evidence ) )['code'], 'Truncating a target must never invent a matching fragment.' );
+indexlane_assert_same( 'html', indexlane_invoke( 'response_content_kind', array( 'Text/HTML; charset=UTF-8' ) ), 'Media types are case-insensitive.' );
+indexlane_assert_same( true, indexlane_invoke( 'robots_text_has_directive', array( 'googlebot:noindex', 'noindex' ) ), 'Agent-scoped robots headers must accept a directive without whitespace after the colon.' );
+indexlane_assert_same( 'differs', indexlane_invoke( 'canonical_state_for', array( '/ok-page/', 'https://example.test/ok-page' ) ), 'Canonical paths must retain meaningful trailing-slash differences.' );
+$base_evidence = indexlane_invoke( 'parse_document_evidence', array( '<base href="/docs/"><link rel="canonical" href="guide"><meta http-equiv="refresh" content="0; url=next">', 'https://example.test/guide' ) );
+indexlane_assert_same( 'https://example.test/docs/guide', $base_evidence['canonical'], 'Relative canonicals must respect the document base URL.' );
+indexlane_assert_same( 'https://example.test/docs/next', $base_evidence['meta_refresh'], 'Relative refresh targets must respect the document base URL.' );
+indexlane_assert_same( 'invalid', indexlane_invoke( 'parse_document_evidence', array( '<link rel="canonical" href="">', 'https://example.test/guide' ) )['canonical_state'], 'An empty canonical must be reported as unreadable.' );
+$range_evidence = indexlane_invoke( 'inspect_response_intent', array( indexlane_response( 206, '', '<p>Partial</p>', array( 'content-type' => 'text/html' ) ), 'https://example.test/guide' ) );
+indexlane_assert_same( 'fragment_inconclusive', indexlane_invoke( 'fragment_intent_finding', array( 'later', $range_evidence ) )['code'], 'A partial HTTP response must not prove a fragment is missing.' );
+$unicode_detail = indexlane_invoke( 'truncate_text', array( str_repeat( 'ก', 1000 ), 1000 ) );
+indexlane_assert_same( true, strlen( $unicode_detail ) <= 1000 && 1 === preg_match( '//u', $unicode_detail ), 'Text limits must bound bytes and preserve UTF-8.' );
+$navigation_rel = indexlane_invoke( 'extract_navigation_attribute_links', array( array( array( 'blockName' => 'core/navigation-link', 'attrs' => array( 'url' => '/guide', 'label' => 'Guide', 'rel' => 'nofollow' ) ) ) ) );
+indexlane_assert_same( 'nofollow', $navigation_rel[0]['rel'], 'Self-closing Navigation blocks must retain their stored relationship.' );
+$fragment_occurrence = indexlane_invoke( 'prepare_link_occurrence', array( array( 'href' => 'https://example.test/ok-page#details', 'anchor' => 'Details' ), $intent_source, $baseline_session['settings'], 'example.test' ) );
+$fragment_row = indexlane_invoke( 'build_checked_result_row', array( $fragment_occurrence['occurrence'], $clean_check ) );
+indexlane_assert_same( 'https://example.test/ok-page#details', $fragment_row['linked_url'], 'Occurrence evidence must preserve the original clickable fragment.' );
+$redirect_fragment_check = $clean_check;
+$redirect_fragment_check['redirect_fragment'] = 'details';
+indexlane_assert_same( '', indexlane_invoke( 'occurrence_intent_summary', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/ok-page', 'missing' ), $redirect_fragment_check ) )['code'], 'A fragment explicitly set by a redirect replaces the original fragment.' );
+$redirect_fragment_check['redirect_fragment'] = '';
+indexlane_assert_same( '', indexlane_invoke( 'occurrence_intent_summary', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/ok-page', 'missing' ), $redirect_fragment_check ) )['code'], 'An explicit empty redirect fragment must clear the original fragment.' );
+
+$nofollow_row = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/ok-page', 'details', 'nofollow' ), $clean_check ) );
+indexlane_assert_same( 'internal_nofollow', $nofollow_row['intent_code'], 'An internal nofollow link must be reported as informational evidence.' );
+indexlane_assert_same( 'info', $nofollow_row['intent_severity'], 'Internal nofollow must never be escalated to an error.' );
+indexlane_assert_same( 'nofollow', $nofollow_row['link_rel'], 'Stored rel evidence must be kept on the occurrence row.' );
+indexlane_assert_same( 'ok', $nofollow_row['result_code'], 'An informational finding must not create an actionable issue.' );
+
+$GLOBALS['indexlane_test_responses'] = array(
+	'https://example.test/old-service' => indexlane_html_response(
+		'<html><head><link rel="canonical" href="https://example.test/new-service"><meta name="robots" content="noindex"></head><body><p id="intro">Moved</p></body></html>',
+		array( 'x-robots-tag' => 'noindex, nofollow' )
+	),
+);
+$moved_request_count = 0;
+$moved_check         = indexlane_invoke( 'check_url', array( 'https://example.test/old-service', 2.0, 5, &$moved_request_count ) );
+indexlane_assert_same( true, $moved_check['intent']['header_noindex'], 'An X-Robots-Tag noindex directive must be recorded.' );
+indexlane_assert_same( true, $moved_check['intent']['meta_noindex'], 'A robots meta noindex directive must be recorded.' );
+indexlane_assert_same( 'differs', $moved_check['intent']['canonical_state'], 'A canonical pointing at another page must be recorded as different.' );
+
+$moved_row = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/old-service' ), $moved_check ) );
+indexlane_assert_same( 'canonical_differs', $moved_row['intent_code'], 'The most actionable intent finding must become the primary intent code.' );
+indexlane_assert_same( 'needs_review', $moved_row['intent_severity'], 'A different canonical must need review.' );
+indexlane_assert_same( 'needs_review', $moved_row['result_code'], 'A 200 response with a different canonical must not stay OK.' );
+indexlane_assert_same( true, false !== strpos( $moved_row['intent_detail'], 'Canonical points to a different URL' ), 'The primary intent finding must remain in the row detail text.' );
+indexlane_assert_same( true, false !== strpos( $moved_row['intent_detail'], 'noindex' ), 'Supporting intent findings must remain in the row detail text.' );
+
+$offsite_canonical_check = indexlane_invoke(
+	'inspect_response_intent',
+	array(
+		indexlane_html_response( '<html><head><link rel="canonical" href="https://elsewhere.example/service"></head><body></body></html>' ),
+		'https://example.test/service',
+	)
+);
+indexlane_assert_same( 'offsite', $offsite_canonical_check['canonical_state'], 'A canonical on another site must be recorded separately.' );
+
+$partial_check = indexlane_invoke(
+	'inspect_response_intent',
+	array(
+		indexlane_html_response( '<html><head></head><body>' . str_repeat( 'a', 262144 ) . '</body></html>' ),
+		'https://example.test/long-page',
+	)
+);
+indexlane_assert_same( true, $partial_check['body_truncated'], 'A response that reaches the body limit must be reported as partial.' );
+indexlane_assert_same( false, $partial_check['fragments_complete'], 'A partial response must not claim complete fragment evidence.' );
+
+$partial_row = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/long-page', 'intro' ), indexlane_intent_check( 'https://example.test/long-page', $partial_check ) ) );
+indexlane_assert_same( 'fragment_inconclusive', $partial_row['intent_code'], 'An unverified fragment must be reported as inconclusive, not missing.' );
+indexlane_assert_same( 'info', $partial_row['intent_severity'], 'An inconclusive fragment must stay informational.' );
+indexlane_assert_same( 'ok', $partial_row['result_code'], 'An inconclusive fragment must not create an actionable issue.' );
+
+$GLOBALS['indexlane_test_responses'] = array(
+	'https://example.test/pricing' => indexlane_html_response(
+		'<html><head><meta http-equiv="refresh" content="0; url=/pricing-new/"></head><body><h2 id="starter">Starter</h2></body></html>'
+	),
+);
+$refresh_request_count = 0;
+$refresh_check         = indexlane_invoke( 'check_url', array( 'https://example.test/pricing', 2.0, 5, &$refresh_request_count ) );
+indexlane_assert_same( 'https://example.test/pricing-new/', $refresh_check['intent']['meta_refresh'], 'A meta refresh target must be resolved against the fetched URL.' );
+
+$refresh_row    = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/pricing' ), $refresh_check ) );
+$missing_row    = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/pricing', 'enterprise' ), $refresh_check ) );
+$present_row    = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/pricing', 'starter' ), $refresh_check ) );
+$clean_missing_row = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/ok-page', 'enterprise' ), $clean_check ) );
+indexlane_assert_same( 'meta_refresh', $refresh_row['intent_code'], 'A meta refresh must be reported as a page-intent warning.' );
+indexlane_assert_same( 'warning', $refresh_row['result_code'], 'A meta refresh on an otherwise healthy page must be a warning.' );
+indexlane_assert_same( 'meta_refresh', $missing_row['intent_code'], 'Page-level findings must take precedence over link-level findings of equal severity.' );
+indexlane_assert_same( true, false !== strpos( $missing_row['intent_detail'], 'does not contain the fragment' ), 'Supporting fragment evidence must remain in the row detail text.' );
+indexlane_assert_same( 'meta_refresh', $present_row['intent_code'], 'A fragment that exists must add no finding of its own.' );
+indexlane_assert_same( 'warning', $present_row['result_code'], 'The page-level warning must still apply to every occurrence.' );
+indexlane_assert_same( 'fragment_missing', $clean_missing_row['intent_code'], 'A fragment that is absent from the page must be reported.' );
+indexlane_assert_same( 'warning', $clean_missing_row['result_code'], 'A missing fragment on an otherwise healthy page must be a warning.' );
+
+$pdf_check = indexlane_invoke(
+	'inspect_response_intent',
+	array(
+		indexlane_response( 200, '', '%PDF-1.4', array( 'content-type' => 'application/pdf' ) ),
+		'https://example.test/brochure.pdf',
+	)
+);
+indexlane_assert_same( 'pdf', $pdf_check['content_kind'], 'A PDF destination must be classified as a file response.' );
+$pdf_row = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/brochure.pdf' ), indexlane_intent_check( 'https://example.test/brochure.pdf', $pdf_check ) ) );
+indexlane_assert_same( 'file_response', $pdf_row['intent_code'], 'A PDF destination must be reported as informational evidence.' );
+indexlane_assert_same( 'ok', $pdf_row['result_code'], 'A PDF destination must not be reported as a broken page.' );
+
+$not_found_check = indexlane_invoke(
+	'inspect_response_intent',
+	array( indexlane_html_response( '<html><head><meta name="robots" content="noindex"></head></html>' ), 'https://example.test/gone' )
+);
+$not_found_row = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/gone' ), indexlane_intent_check( 'https://example.test/gone', $not_found_check, 404 ) ) );
+indexlane_assert_same( 'error', $not_found_row['result_code'], 'A broken transport result must never be softened by intent evidence.' );
+
+indexlane_assert_same( 'error', indexlane_invoke( 'merge_intent_result_code', array( 'error', 'needs_review' ) ), 'Intent must not soften a broken transport result.' );
+indexlane_assert_same( 'blocked', indexlane_invoke( 'merge_intent_result_code', array( 'blocked', 'needs_review' ) ), 'Intent must not soften a blocked transport result.' );
+indexlane_assert_same( 'warning', indexlane_invoke( 'merge_intent_result_code', array( 'warning', 'needs_review' ) ), 'A redirected destination must keep its transport warning.' );
+indexlane_assert_same( 'needs_review', indexlane_invoke( 'merge_intent_result_code', array( 'ok', 'needs_review' ) ), 'Page-level intent must escalate a healthy response.' );
+indexlane_assert_same( 'warning', indexlane_invoke( 'merge_intent_result_code', array( 'ok', 'warning' ) ), 'A page warning must escalate a healthy response.' );
+indexlane_assert_same( 'warning', indexlane_invoke( 'merge_intent_result_code', array( 'warning', 'info' ) ), 'Informational intent must not change a transport warning.' );
+indexlane_assert_same( 'ok', indexlane_invoke( 'merge_intent_result_code', array( 'ok', 'info' ) ), 'Informational intent alone must stay OK.' );
+
+$http_calls_before_intent_rows = count( $GLOBALS['indexlane_test_http_calls'] );
+indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/old-service', 'intro' ), $moved_check ) );
+indexlane_assert_same( $http_calls_before_intent_rows, count( $GLOBALS['indexlane_test_http_calls'] ), 'Occurrence-level intent evidence must reuse the stored destination check.' );
+
+$intent_impact = indexlane_invoke( 'build_destination_impact', array( array( $moved_row ) ) );
+indexlane_assert_same( 1, count( $intent_impact ), 'A destination that returns 200 but needs review must be reported as a problem URL.' );
+indexlane_assert_same( 'Responds, but needs review', $intent_impact[0]['impact'], 'An intent-only destination must be labelled separately from broken and redirected URLs.' );
+indexlane_assert_same( 'canonical_differs', $intent_impact[0]['intent_code_evidence'], 'Grouped problem URLs must retain the primary intent code of every occurrence.' );
+indexlane_assert_same( true, false !== strpos( $intent_impact[0]['intent_evidence'], 'noindex' ), 'Grouped problem URLs must retain the readable intent evidence.' );
+indexlane_assert_same( 'Needs review', $intent_impact[0]['result'], 'Grouped problem URLs must retain the merged outcome label.' );
+
+$warning_only_impact = indexlane_invoke( 'build_destination_impact', array( array( $refresh_row ) ) );
+indexlane_assert_same( 'Responds with a warning', $warning_only_impact[0]['impact'], 'A meta-refresh destination must be labelled as a warning.' );
+
+$intent_impact_csv = indexlane_invoke( 'build_csv_rows', array( array( $moved_row ), 'impact' ) );
+indexlane_assert_same( 'Intent', $intent_impact_csv[0][11], 'Problem-URL CSV must expose the stable intent codes.' );
+indexlane_assert_same( 'canonical_differs', $intent_impact_csv[1][11], 'Problem-URL CSV must export the exact primary intent code.' );
+indexlane_assert_same( true, false !== strpos( (string) $intent_impact_csv[1][12], 'Canonical points to a different URL' ), 'Problem-URL CSV must export readable intent details.' );
+
+$intent_details_csv = indexlane_invoke( 'build_csv_rows', array( array( $moved_row ), 'details' ) );
+indexlane_assert_same( 'Intent', $intent_details_csv[0][10], 'Link-details CSV must expose the stable intent code.' );
+indexlane_assert_same( 'canonical_differs', $intent_details_csv[1][10], 'Link-details CSV must export the primary intent code.' );
+indexlane_assert_same( 'Outcome', $intent_details_csv[0][13], 'Link-details CSV must retain its outcome column after the intent columns.' );
+
+$intent_baseline_session                            = $baseline_session;
+$intent_baseline_session['id']                      = '12345678-1234-4abc-8def-000000000060';
+$intent_baseline_session['results']                 = array( $moved_row );
+$intent_baseline_session['stats']['links_extracted'] = 1;
+$intent_baseline_session['stats']['links_audited']   = 1;
+$intent_baseline_session['stats']['unique_destinations_checked'] = 1;
+$intent_baseline_session['stats']['http_requests']   = 1;
+$intent_baseline_session['stats']['actionable_issues'] = 1;
+
+$intent_baseline = indexlane_invoke( 'build_baseline_from_session', array( $intent_baseline_session ) );
+indexlane_assert_same( false, is_wp_error( $intent_baseline ), 'A scan with an OK-but-wrong destination must be saveable for comparison.' );
+indexlane_assert_same( 'canonical_differs', $intent_baseline['results'][0]['intent_code'], 'Saved scans must retain the exact intent code.' );
+indexlane_assert_same(
+	$intent_baseline,
+	indexlane_invoke( 'parse_baseline_json', array( wp_json_encode( $intent_baseline, JSON_UNESCAPED_SLASHES ) ) ),
+	'Destination-intent evidence must round-trip through strict import validation.'
+);
+
+$unsupported_intent                          = $intent_baseline;
+$unsupported_intent['results'][0]['intent_code'] = 'invented_intent';
+$unsupported_intent_result                   = indexlane_invoke( 'validate_baseline', array( $unsupported_intent, true ) );
+indexlane_assert_same( true, is_wp_error( $unsupported_intent_result ), 'An unsupported intent code must fail strict import validation.' );
+
+$severity_without_code                       = $intent_baseline;
+$severity_without_code['results'][0]['intent_code'] = '';
+$severity_without_code_result                = indexlane_invoke( 'validate_baseline', array( $severity_without_code, true ) );
+indexlane_assert_same( true, is_wp_error( $severity_without_code_result ), 'An intent severity without an intent code must fail strict import validation.' );
+
+$wrong_intent_severity = $intent_baseline;
+$wrong_intent_severity['results'][0]['intent_severity'] = 'info';
+indexlane_assert_same( true, is_wp_error( indexlane_invoke( 'validate_baseline', array( $wrong_intent_severity, true ) ) ), 'Known intent codes with contradictory severities must fail import.' );
+$long_rel_baseline = $intent_baseline;
+$long_rel_baseline['results'][0]['link_rel'] = implode( ' ', array_map( static function ( $number ) { return str_repeat( 'a', 31 ) . $number; }, range( 0, 7 ) ) );
+indexlane_assert_same( false, is_wp_error( indexlane_invoke( 'validate_baseline', array( $long_rel_baseline, true ) ) ), 'All bounded rel lists produced by the scanner must be importable.' );
+
+$intent_verification_row = indexlane_result_row(
+	'https://example.test/service',
+	'https://example.test/old-service',
+	'200',
+	0,
+	'https://example.test/old-service',
+	'None',
+	'Needs review',
+	'Service page',
+	'Service',
+	array(
+		'intent_code'     => 'noindex',
+		'intent_severity' => 'needs_review',
+		'intent_detail'   => 'The page contains a noindex robots meta tag.',
+	)
+);
+$intent_comparison = indexlane_invoke( 'build_scan_comparison', array( $intent_baseline['results'], array( $intent_verification_row ) ) );
+indexlane_assert_same( 'changed', $intent_comparison['rows'][0]['category'], 'A destination whose intent changed must be reported as changed.' );
+indexlane_assert_same( true, in_array( 'intent_code', $intent_comparison['rows'][0]['changed_fields'], true ), 'Changed intent must be named as changed evidence.' );
+indexlane_assert_same( 'changed', $intent_comparison['rows'][0]['direction'], 'A lateral intent change must report changed behavior.' );
+
+$intent_verification_session                              = $intent_baseline_session;
+$intent_verification_session['id']                        = '12345678-1234-4abc-8def-000000000061';
+$intent_verification_session['scan_mode']                 = 'verification';
+$intent_verification_session['baseline_id']               = $intent_baseline['baseline_id'];
+$intent_verification_session['baseline_fingerprint']      = indexlane_invoke( 'baseline_fingerprint', array( $intent_baseline ) );
+$intent_verification_session['results']                   = array( $intent_verification_row );
+$stored_intent_comparison = indexlane_invoke( 'save_baseline', array( $intent_baseline ) );
+indexlane_assert_same( true, $stored_intent_comparison, 'A scan with intent evidence must persist as the saved comparison.' );
+$comparison_with_intent = indexlane_invoke( 'get_session_comparison', array( $intent_verification_session ) );
+indexlane_assert_same( 'changed', $comparison_with_intent['rows'][0]['category'], 'A fix check must compare stored intent evidence exactly.' );
+indexlane_assert_same( 'Saved Scan Intent', indexlane_invoke( 'build_comparison_csv_rows', array( $comparison_with_intent ) )[0][10], 'Comparison CSV must expose the saved-scan intent code.' );
+indexlane_assert_same( 'Latest Scan Intent', indexlane_invoke( 'build_comparison_csv_rows', array( $comparison_with_intent ) )[0][11], 'Comparison CSV must expose the latest-scan intent code.' );
+
+ob_start();
+indexlane_invoke( 'render_destination_impact', array( $intent_impact ) );
+$intent_impact_html = (string) ob_get_clean();
+indexlane_assert_same( true, false !== strpos( $intent_impact_html, 'Responds, but needs review' ), 'The problem-URL table must label an OK-but-wrong destination.' );
+indexlane_assert_same( true, false !== strpos( $intent_impact_html, 'Page intent' ), 'The problem-URL details must name the page-intent evidence.' );
+indexlane_assert_same( true, false !== strpos( $intent_impact_html, 'Canonical points to a different URL' ), 'The problem-URL details must show the stored intent evidence.' );
+
+ob_start();
+indexlane_invoke( 'render_occurrence_details', array( array( $moved_row ) ) );
+$intent_details_html = (string) ob_get_clean();
+indexlane_assert_same( 11, substr_count( $intent_details_html, '<th>' ), 'The link-details table must expose one header per evidence column.' );
+indexlane_assert_same( 11, substr_count( $intent_details_html, '<td>' ), 'Every link-details column must keep a matching cell.' );
+indexlane_assert_same( true, false !== strpos( $intent_details_html, 'Canonical points to a different URL' ), 'The link-details table must show page intent for each occurrence.' );
+
+ob_start();
+indexlane_invoke(
+	'render_occurrence_details',
+	array(
+		array(
+			indexlane_result_row(
+				'https://example.test/source-a',
+				'https://example.test/healthy',
+				'200',
+				0,
+				'https://example.test/healthy',
+				'None',
+				'OK'
+			),
+		),
+	)
+);
+$healthy_details_html = (string) ob_get_clean();
+indexlane_assert_same(
+	2,
+	preg_match_all( '#<td>\s*None\s*</td>#', $healthy_details_html ),
+	'An occurrence without intent evidence must render an explicit empty value beside its empty warning.'
+);
+
+ob_start();
+indexlane_invoke( 'render_comparison', array( $comparison_with_intent ) );
+$comparison_html = (string) ob_get_clean();
+indexlane_assert_same( true, false !== strpos( $comparison_html, 'Page intent' ), 'The comparison details must name the page-intent evidence.' );
+indexlane_assert_same( true, false !== strpos( $comparison_html, 'noindex robots meta tag' ), 'The comparison details must show the latest intent evidence.' );
+indexlane_assert_same( true, false !== strpos( $comparison_html, 'page intent' ), 'A changed intent must be named among the changed fields.' );
 
 fwrite( STDOUT, "All behavioral tests passed.\n" );

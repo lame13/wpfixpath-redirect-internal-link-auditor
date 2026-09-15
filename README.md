@@ -6,6 +6,8 @@ IndexLane runs on demand inside WordPress admin. Use it after moving a site, cha
 
 [Install from WordPress.org](https://wordpress.org/plugins/indexlane-redirect-internal-link-auditor/) · [Project page](https://indexlane.dev/plugins/redirect-internal-link-auditor) · [Changelog](CHANGELOG.md)
 
+Internal links can return **200 but still need attention**. Page intent shows canonical differences, noindex, meta refreshes, and missing fragment targets beside the HTTP evidence.
+
 ## When to use it
 
 - **After a migration:** find links to old domains you supply and common staging or development domains. These off-site URLs are reported without being fetched.
@@ -70,10 +72,11 @@ Each AJAX batch processes at most five stored sources and makes at most five act
 - Save one explicitly selected completed scan for comparison for the current administrator.
 - Download or upload portable, versioned JSON scan data with strict format, file-size, completeness, counter, and site-URL validation.
 - Import legacy schema-1 content-only saved scans without widening their scope.
+- Import schema-2 saved scans written before destination-intent auditing as transport-only evidence.
 - Rerun the saved source providers, post types, content scope, old domains, timeout, and redirect limit exactly.
 - Bind each fix check to the saved scan revision used when it started.
 - Classify URL issues as new, changed, resolved, or still present.
-- Show saved-scan and latest-scan status chains, redirect counts, final URLs, outcomes, times linked, and editable sources affected.
+- Show saved-scan and latest-scan status chains, redirect counts, final URLs, page intent, outcomes, times linked, and editable sources affected.
 - Download the completed comparison as CSV without making additional HTTP requests.
 - Delete the saved scan explicitly without deleting the current temporary scan session.
 
@@ -88,9 +91,29 @@ The comparison is derived entirely from retained results. It never rescans durin
 - same-site redirects that leave the site, without fetching the external target;
 - links pointing to old domains entered by the administrator;
 - common staging or development-domain links;
-- exact source, source surface, scope, edit URL, link text, status chain, redirect count, final URL, warning, and outcome.
+- links that answer with `200` but still point somewhere else through a canonical or a meta refresh;
+- links whose page is marked `noindex` in the response header or the robots meta tag;
+- links whose stored fragment, such as `/pricing/#enterprise`, no longer exists on the page;
+- exact source, source surface, scope, edit URL, link text, status chain, redirect count, final URL, warning, page intent, and outcome.
 
 Unrelated external links are skipped. Old, staging, and development-domain links are reported but never fetched.
+
+## Destination intent
+
+Transport evidence answers whether a URL responds. Destination intent answers whether the page it responds with is still the page the link promised. Each unique same-site destination is inspected once after its final response, and the derived evidence is reused for every occurrence, so no occurrence adds an outbound request.
+
+The inspection records:
+
+- the declared canonical, and whether it matches, differs, points to another site, or cannot be read;
+- `noindex` and `nofollow` from the `X-Robots-Tag` header and the robots meta tag;
+- a meta refresh target;
+- the `id` and anchor `name` targets stored in the fetched page, used to confirm linked fragments;
+- the response content type, so a PDF or image destination is reported as a file instead of a broken page;
+- each occurrence's stored `rel` attribute, so an internal `nofollow` is reported conservatively.
+
+Findings are classified separately from transport results. Intent only upgrades a healthy response: a different or off-site canonical, and `noindex`, move a `200` response to needs review; a meta refresh or a missing fragment moves it to warning; a file response, an inconclusive fragment, a page-level `nofollow`, and an internal `nofollow` are informational and never create an actionable issue. A destination that already redirects, is blocked, or is broken keeps the outcome its transport evidence produced — a `301` to a page whose canonical differs again stays a warning — and its page intent is reported beside that result.
+
+The stable intent codes are `canonical_differs`, `canonical_offsite`, `canonical_unreadable`, `noindex`, `meta_refresh`, `fragment_missing`, `fragment_inconclusive`, `page_nofollow`, `internal_nofollow`, and `file_response`. Exports use those codes, and the human-readable wording is translated with the rest of the interface.
 
 ## Content link coverage
 
@@ -114,7 +137,7 @@ When a selected source links through a redirect to a published WordPress URL, co
 
 ## Problem URLs
 
-One row is derived for each broken/error or redirected URL. The primary view shows the URL, outcome, times linked, and exact editable sources affected. A single-source result links directly to that source and identifies its surface and scope; multi-source results expose the full list. HTTP status, redirect count, final URLs, and warnings remain available under technical details. The report never makes additional requests.
+One row is derived for each broken/error URL, redirected URL, and URL that returns `200` but still needs review. The primary view shows the URL, outcome, times linked, and exact editable sources affected. A single-source result links directly to that source and identifies its surface and scope; multi-source results expose the full list. HTTP status, redirect count, final URLs, warnings, and page intent remain available under technical details. The report never makes additional requests.
 
 URL grouping normalizes scheme and host case, fragments, and default ports. Paths, query strings, schemes, non-default ports, and trailing slashes remain distinct because they can return different results.
 
@@ -160,7 +183,7 @@ array(
 );
 ```
 
-`source` may be `null` when a snapshotted record disappeared. A source must have a globally stable `key` and either stored `content` or an exact `links` list containing `href` and `anchor` values. `context` is `contextual` or `shared`. A contextual provider may also supply `content_item` (`id`, `title`, `type`, `url`, and `edit_url`) when its records should become coverage targets. Callbacks should advance deterministically, keep cursors serializable, and inspect stored data without rendering or executing user content.
+`source` may be `null` when a snapshotted record disappeared. A source must have a globally stable `key` and either stored `content` or an exact `links` list containing `href` and `anchor` values, plus optional `rel` evidence. `context` is `contextual` or `shared`. A contextual provider may also supply `content_item` (`id`, `title`, `type`, `url`, and `edit_url`) when its records should become coverage targets. Callbacks should advance deterministically, keep cursors serializable, and inspect stored data without rendering or executing user content.
 
 If a provider used by a paused scan disappears or returns an invalid contract, the scan stops with a recoverable message instead of silently producing incomplete evidence. A saved fix check likewise refuses to run if its provider is no longer registered.
 
@@ -179,6 +202,8 @@ All plugin-owned administrator, status, warning, result, JavaScript, and CSV-hea
 This is a stored-source link checker, not a rendered-site crawler. It does not execute shortcodes, inspect arbitrary metadata or proprietary page-builder storage, render templates, or crawl frontend pages. Third-party storage requires a provider registered by the plugin that owns and understands it.
 
 HTTP checks use bounded GET response bodies, administrator-selected timeouts and redirect limits, WordPress unsafe-URL rejection, and manual same-site redirect handling.
+
+Destination intent is judged from the fetched same-site response only. The plugin reads the response header, the head of the document, and up to 256 KB of the body, retains no response bodies, and keeps only derived evidence. A response that reaches that bound is treated as partial: fragment findings are then reported as inconclusive rather than missing, and up to 100 fragment targets are stored per page. Fragment-only links within their source page remain outside the scan. Page intent is inspected only on final successful same-site responses, including those reached after redirects. Transport outcomes remain dominant; no canonical target is fetched, and no soft-404, title, heading, schema, or score heuristic is applied.
 
 One scan can snapshot at most 100,000 stored sources. Saved-scan uploads are limited to 20 MB, 100,000 content items, and 100,000 link-result rows. Uploaded data must use an exact supported format and belong to the current normalized site URL.
 
@@ -213,6 +238,8 @@ Problem-URL columns:
 - Maximum Redirects
 - Final URLs
 - Warnings
+- Intent
+- Intent Details
 
 Link-detail columns:
 
@@ -226,10 +253,12 @@ Link-detail columns:
 - Redirects
 - Final URL
 - Warning
+- Intent
+- Intent Details
 - Link Text
 - Outcome
 
-Comparison columns include the outcome, change, URL, changed fields, and explicit saved-scan/latest-scan values for each technical field.
+Comparison columns include the outcome, change, URL, changed fields, and explicit saved-scan/latest-scan values for each technical field, including the page-intent code of each side.
 
 All downloads protect spreadsheet cells that could otherwise be interpreted as formulas.
 
@@ -259,6 +288,8 @@ WP_CLI_BIN=/path/to/wp ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-
 ```
 
 The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded adapter/integration suite, and exercises the authenticated AJAX lifecycle, saved-scan save/upload/download/delete flow, exact-scope fix checks, comparison downloads, coverage filters, and detail views over HTTP.
+
+[Publishing commands for 0.7.0](docs/publishing-0.7.0.md) cover Git, GitHub releases, and the existing WordPress.org SVN checkout.
 
 Build the production ZIP for WordPress.org submission:
 

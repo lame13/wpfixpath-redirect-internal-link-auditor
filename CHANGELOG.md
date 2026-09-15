@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.7.0 - 2026-09-15
+
+- Added destination-intent auditing for internal URLs that respond successfully but declare a different or off-site canonical, noindex, a meta refresh, or a missing linked fragment.
+- Kept transport outcomes dominant and reported file responses, inconclusive fragments, and page/internal nofollow as informational evidence.
+- Reused bounded final-response evidence across link occurrences without extra HTTP requests or retaining response bodies.
+- Added page intent to Problem URLs, Link details, saved-scan comparisons, and CSV exports; retained strict import compatibility with 0.5 and 0.6 saved scans.
+- Fixed literal HTML being mistaken for metadata, exact and numeric fragment matching, partial-response handling, relative canonical bases, Navigation-block rel evidence, and UTF-8 byte limits.
+- Updated the WordPress.org listing, example CSVs, screenshots, walkthrough, release notes, and publishing commands.
+
 ## 0.6.1 - 2026-09-07
 
 - Reworked the WordPress.org listing and README around migration checks, URL changes, and finding the exact editable source of a link.

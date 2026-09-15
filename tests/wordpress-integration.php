@@ -551,8 +551,8 @@ try {
 		throw new RuntimeException( $baseline->get_error_message() );
 	}
 	indexlane_wp_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'A completed WordPress scan must produce portable baseline evidence.' );
-	indexlane_wp_assert_same( 2, $baseline['schema_version'], 'The baseline must use the source-aware evidence schema.' );
-	indexlane_wp_assert_same( '0.6.1', $baseline['plugin_version'], 'The saved scan must identify the plugin version that created it.' );
+	indexlane_wp_assert_same( 3, $baseline['schema_version'], 'The baseline must use the destination-intent evidence schema.' );
+	indexlane_wp_assert_same( '0.7.0', $baseline['plugin_version'], 'The saved scan must identify the plugin version that created it.' );
 	indexlane_wp_assert_same( $home, $baseline['site_url'], 'The baseline must be bound to this exact WordPress site URL.' );
 	indexlane_wp_assert_same( 7, $baseline['scope']['total_sources'], 'The baseline must preserve the complete selected source corpus.' );
 	indexlane_wp_assert_same( 7, $baseline['scope']['content_items'], 'The baseline must preserve the selected content-target corpus.' );

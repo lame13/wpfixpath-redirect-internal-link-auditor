@@ -150,7 +150,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			);
 		}
 
-		$baseline['schema_version']            = self::BASELINE_SCHEMA_VERSION;
+		// This step upgrades the document to the source-aware schema; the next
+		// upgrade step in validate_baseline() brings it to the current schema.
+		$baseline['schema_version']            = 2;
 		$baseline['settings']['source_types']  = array( 'content' );
 		$baseline['scope']                     = array(
 			'source_types'  => array( 'content' ),
@@ -176,6 +178,48 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	}
 
 	/**
+	 * Upgrade strict source-aware saved-scan evidence to the intent schema.
+	 *
+	 * A saved scan written before destination-intent auditing records transport
+	 * evidence only, so each occurrence is normalized to "no intent finding"
+	 * instead of being rejected during import.
+	 *
+	 * @param array<string,mixed> $baseline Source-aware baseline.
+	 * @return array<string,mixed>|WP_Error
+	 */
+	private static function upgrade_source_aware_baseline( array $baseline ) {
+		$top_keys    = array( 'format', 'schema_version', 'baseline_id', 'plugin_version', 'site_url', 'scan_id', 'scan_utc', 'saved_utc', 'settings', 'scope', 'completion', 'stats', 'content_items', 'results' );
+		$result_keys = array( 'source_id', 'source_key', 'source_title', 'source_type', 'source_type_code', 'source_context', 'source_content_id', 'source_url', 'source_edit_url', 'linked_url', 'http_status', 'redirect_count', 'final_url', 'warning', 'anchor_text', 'result', 'result_code', 'is_same_site', 'direct_target_id', 'final_target_id', 'coverage_target_id', 'link_kind_code' );
+
+		if (
+			! self::array_has_exact_keys( $baseline, $top_keys ) ||
+			self::BASELINE_FORMAT !== $baseline['format'] ||
+			! is_array( $baseline['results'] ) ||
+			! self::is_list_array( $baseline['results'] )
+		) {
+			return new WP_Error( 'baseline_invalid_schema', __( 'This saved-scan file format is not supported.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$results = array();
+		foreach ( $baseline['results'] as $row ) {
+			if ( ! is_array( $row ) || ! self::array_has_exact_keys( $row, $result_keys ) ) {
+				return new WP_Error( 'baseline_invalid_schema', __( 'A saved link result contains unsupported fields.', 'indexlane-redirect-internal-link-auditor' ) );
+			}
+
+			$row['link_rel']        = '';
+			$row['intent_code']     = '';
+			$row['intent_severity'] = '';
+			$row['intent_detail']   = '';
+			$results[]              = $row;
+		}
+
+		$baseline['schema_version'] = 3;
+		$baseline['results']        = $results;
+
+		return $baseline;
+	}
+
+	/**
 	 * Validate and normalize a baseline document.
 	 *
 	 * @param array<string,mixed> $baseline      Decoded baseline.
@@ -185,6 +229,13 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	private static function validate_baseline( array $baseline, bool $validate_site = true ) {
 		if ( isset( $baseline['schema_version'] ) && 1 === $baseline['schema_version'] ) {
 			$baseline = self::upgrade_legacy_baseline( $baseline );
+			if ( is_wp_error( $baseline ) ) {
+				return $baseline;
+			}
+		}
+
+		if ( isset( $baseline['schema_version'] ) && 2 === $baseline['schema_version'] ) {
+			$baseline = self::upgrade_source_aware_baseline( $baseline );
 			if ( is_wp_error( $baseline ) ) {
 				return $baseline;
 			}
@@ -475,7 +526,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 * @return array<string,mixed>|WP_Error
 	 */
 	private static function validate_baseline_result_row( $row ) {
-		$keys = array( 'source_id', 'source_key', 'source_title', 'source_type', 'source_type_code', 'source_context', 'source_content_id', 'source_url', 'source_edit_url', 'linked_url', 'http_status', 'redirect_count', 'final_url', 'warning', 'anchor_text', 'result', 'result_code', 'is_same_site', 'direct_target_id', 'final_target_id', 'coverage_target_id', 'link_kind_code' );
+		$keys = array( 'source_id', 'source_key', 'source_title', 'source_type', 'source_type_code', 'source_context', 'source_content_id', 'source_url', 'source_edit_url', 'linked_url', 'http_status', 'redirect_count', 'final_url', 'warning', 'anchor_text', 'link_rel', 'result', 'result_code', 'intent_code', 'intent_severity', 'intent_detail', 'is_same_site', 'direct_target_id', 'final_target_id', 'coverage_target_id', 'link_kind_code' );
 		if ( ! is_array( $row ) || ! self::array_has_exact_keys( $row, $keys ) ) {
 			return new WP_Error( 'baseline_invalid_schema', __( 'A saved link result contains unsupported fields.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
@@ -499,7 +550,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			'final_url'       => 2048,
 			'warning'         => 4096,
 			'anchor_text'     => 2000,
+			'link_rel'        => 263,
 			'result'          => 200,
+			'intent_code'     => 32,
+			'intent_severity' => 20,
+			'intent_detail'   => 2000,
 		);
 		foreach ( $string_limits as $string_key => $limit ) {
 			if ( ! self::is_bounded_string( $row[ $string_key ], $limit ) ) {
@@ -519,6 +574,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			! is_bool( $row['is_same_site'] ) ||
 			! is_string( $row['link_kind_code'] ) ||
 			! in_array( $row['link_kind_code'], array( 'direct', 'redirected' ), true ) ||
+			! self::is_supported_intent_code( $row['intent_code'] ) ||
+			! in_array( $row['intent_severity'], array( '', 'info', 'warning', 'needs_review' ), true ) ||
+			self::intent_severity_for_code( $row['intent_code'] ) !== $row['intent_severity'] ||
+			( '' === $row['intent_code'] && '' !== $row['intent_detail'] ) ||
+			( '' !== $row['link_rel'] && ! preg_match( '/^(?:[a-z][a-z0-9:_-]{0,31})(?: [a-z][a-z0-9:_-]{0,31}){0,7}$/', $row['link_rel'] ) ) ||
 			( $row['redirect_count'] > 0 ? 'redirected' : 'direct' ) !== $row['link_kind_code']
 		) {
 			return new WP_Error( 'baseline_invalid_evidence', __( 'A saved link result contains inconsistent status or outcome data.', 'indexlane-redirect-internal-link-auditor' ) );
@@ -721,6 +781,46 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	}
 
 	/**
+	 * Whether one stored intent code belongs to the supported evidence set.
+	 *
+	 * @param mixed $value Raw value.
+	 */
+	private static function is_supported_intent_code( $value ): bool {
+		return is_string( $value ) && in_array(
+			$value,
+			array(
+				'',
+				'canonical_differs',
+				'canonical_offsite',
+				'canonical_unreadable',
+				'noindex',
+				'meta_refresh',
+				'fragment_missing',
+				'fragment_inconclusive',
+				'page_nofollow',
+				'internal_nofollow',
+				'file_response',
+			),
+			true
+		);
+	}
+
+	/**
+	 * Return the fixed severity for one supported primary intent code.
+	 *
+	 * @param string $code Validated intent code.
+	 */
+	private static function intent_severity_for_code( string $code ): string {
+		if ( '' === $code ) {
+			return '';
+		}
+		if ( in_array( $code, array( 'canonical_differs', 'canonical_offsite', 'noindex' ), true ) ) {
+			return 'needs_review';
+		}
+		return in_array( $code, array( 'meta_refresh', 'fragment_missing' ), true ) ? 'warning' : 'info';
+	}
+
+	/**
 	 * Validate an RFC 4122-style UUID used by scan and baseline identity.
 	 *
 	 * @param mixed $value Raw value.
@@ -893,6 +993,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 					'result_rank'     => self::result_code_rank( 'ok' ),
 					'occurrence_count' => 0,
 					'source_keys'     => array(),
+					'intent_code'     => '',
+					'intent_rank'     => 0,
+					'intent_details'  => array(),
 				);
 			}
 
@@ -928,20 +1031,42 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 				$groups[ $group_key ]['result_code'] = $result_code;
 				$groups[ $group_key ]['result_rank'] = $result_rank;
 			}
+
+			$intent_code     = isset( $row['intent_code'] ) && is_string( $row['intent_code'] ) ? trim( $row['intent_code'] ) : '';
+			$intent_severity = isset( $row['intent_severity'] ) && is_string( $row['intent_severity'] ) ? trim( $row['intent_severity'] ) : '';
+			if ( '' !== $intent_code ) {
+				$intent_rank = self::intent_severity_rank( $intent_severity );
+				if (
+					$intent_rank > $groups[ $group_key ]['intent_rank'] ||
+					( $intent_rank === $groups[ $group_key ]['intent_rank'] && strcmp( $intent_code, $groups[ $group_key ]['intent_code'] ) < 0 )
+				) {
+					$groups[ $group_key ]['intent_code'] = $intent_code;
+					$groups[ $group_key ]['intent_rank'] = $intent_rank;
+				}
+			}
+
+			$intent_detail = isset( $row['intent_detail'] ) && is_string( $row['intent_detail'] ) ? trim( $row['intent_detail'] ) : '';
+			if ( '' !== $intent_detail ) {
+				$groups[ $group_key ]['intent_details'][ $intent_detail ] = true;
+			}
 		}
 
 		$evidence = array();
 		foreach ( $groups as $group_key => $group ) {
 			$statuses  = array_keys( $group['http_statuses'] );
 			$final_urls = array_keys( $group['final_urls'] );
+			$intent_details = array_keys( $group['intent_details'] );
 			sort( $statuses, SORT_STRING );
 			sort( $final_urls, SORT_STRING );
+			sort( $intent_details, SORT_STRING );
 
 			$evidence[ $group_key ] = array(
 				'destination_url'       => $group['destination_url'],
 				'http_status_chain'     => implode( ' | ', $statuses ),
 				'redirect_count'        => (int) $group['redirect_count'],
 				'final_url'             => implode( ' | ', $final_urls ),
+				'intent_code'           => (string) $group['intent_code'],
+				'intent_detail'         => implode( ' | ', $intent_details ),
 				'result_code'           => $group['result_code'],
 				'result_rank'           => (int) $group['result_rank'],
 				'result_severity'       => self::result_label_for_code( $group['result_code'] ),
@@ -976,7 +1101,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 	 * @return array<int,string>
 	 */
 	private static function comparison_changed_fields( ?array $old, ?array $new ): array {
-		$fields = array( 'http_status_chain', 'redirect_count', 'final_url', 'result_code', 'occurrence_count', 'affected_source_count' );
+		$fields = array( 'http_status_chain', 'redirect_count', 'final_url', 'intent_code', 'intent_detail', 'result_code', 'occurrence_count', 'affected_source_count' );
 		if ( ! is_array( $old ) || ! is_array( $new ) ) {
 			return $fields;
 		}
@@ -1064,6 +1189,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 			'http_status_chain'     => __( 'HTTP status chain', 'indexlane-redirect-internal-link-auditor' ),
 			'redirect_count'        => __( 'redirect count', 'indexlane-redirect-internal-link-auditor' ),
 			'final_url'             => __( 'final URL', 'indexlane-redirect-internal-link-auditor' ),
+			'intent_code'           => __( 'page intent', 'indexlane-redirect-internal-link-auditor' ),
+			'intent_detail'         => __( 'page intent details', 'indexlane-redirect-internal-link-auditor' ),
 			'result_code'           => __( 'outcome', 'indexlane-redirect-internal-link-auditor' ),
 			'occurrence_count'      => __( 'times linked', 'indexlane-redirect-internal-link-auditor' ),
 			'affected_source_count' => __( 'editable sources affected', 'indexlane-redirect-internal-link-auditor' ),
@@ -1266,6 +1393,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 				self::csv_safe( __( 'Latest Scan Redirect Count', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Saved Scan Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Latest Scan Final URL', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Intent', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Intent', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Saved Scan Intent Details', 'indexlane-redirect-internal-link-auditor' ) ),
+				self::csv_safe( __( 'Latest Scan Intent Details', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Saved Scan Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Latest Scan Outcome', 'indexlane-redirect-internal-link-auditor' ) ),
 				self::csv_safe( __( 'Saved Scan Times Linked', 'indexlane-redirect-internal-link-auditor' ) ),
@@ -1287,6 +1418,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 				self::comparison_csv_value( $row['new'], 'redirect_count' ),
 				self::comparison_csv_value( $row['old'], 'final_url' ),
 				self::comparison_csv_value( $row['new'], 'final_url' ),
+				self::comparison_csv_value( $row['old'], 'intent_code' ),
+				self::comparison_csv_value( $row['new'], 'intent_code' ),
+				self::comparison_csv_value( $row['old'], 'intent_detail' ),
+				self::comparison_csv_value( $row['new'], 'intent_detail' ),
 				self::comparison_csv_value( $row['old'], 'result_severity' ),
 				self::comparison_csv_value( $row['new'], 'result_severity' ),
 				self::comparison_csv_value( $row['old'], 'occurrence_count' ),

@@ -3,7 +3,7 @@
  * Plugin Name: IndexLane Redirect & Internal Link Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
  * Description: Find broken links and leftover migration URLs, open their editing locations, and check whether your fixes worked.
- * Version: 0.6.1
+ * Version: 0.7.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -37,14 +37,14 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		use IndexLane_Redirect_Internal_Link_Auditor_Baselines;
 
 		private const PLUGIN_FILE                     = __FILE__;
-		private const VERSION                         = '0.6.1';
+		private const VERSION                         = '0.7.0';
 		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY                      = 'manage_options';
 		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';
 		private const NONCE_NAME                      = 'indexlane_rila_nonce';
-		private const SESSION_SCHEMA_VERSION          = 4;
+		private const SESSION_SCHEMA_VERSION          = 5;
 		private const BASELINE_FORMAT                 = 'indexlane-rila-baseline';
-		private const BASELINE_SCHEMA_VERSION         = 2;
+		private const BASELINE_SCHEMA_VERSION         = 3;
 		private const BASELINE_USER_OPTION            = 'indexlane_rila_baseline';
 		private const MAX_BASELINE_FILE_SIZE          = 20971520;
 		private const MAX_BASELINE_CONTENT_ITEMS      = 100000;
@@ -57,7 +57,18 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		private const MAX_SOURCE_ITEMS_PER_BATCH      = 5;
 		private const MAX_SESSION_SOURCE_ITEMS        = 100000;
 		private const MAX_NUMERIC_CONTENT_ITEMS       = 10000;
-		private const RESPONSE_SIZE_LIMIT              = 4096;
+		/**
+		 * Bounded response body retained per unique destination check.
+		 *
+		 * The head of the final same-site response must contain the robots meta
+		 * tag and the canonical link, and the body is inspected for the fragment
+		 * targets of the links that point at that destination. The body is never
+		 * stored, and a response that reaches this bound is treated as partial.
+		 */
+		private const RESPONSE_SIZE_LIMIT              = 262144;
+		private const MAX_INTENT_FRAGMENT_TARGETS      = 100;
+		private const MAX_INTENT_FRAGMENT_LENGTH       = 200;
+		private const MAX_INTENT_DETAIL_LENGTH         = 1000;
 
 		/**
 		 * Hook suffix for the plugin's Tools screen.
