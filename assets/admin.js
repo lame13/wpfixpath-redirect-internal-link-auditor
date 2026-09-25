@@ -296,6 +296,15 @@
 		form.scrollIntoView( { behavior: 'smooth', block: 'start' } );
 	} );
 
+	Array.from( document.querySelectorAll( '[data-indexlane-rila-confirm]' ) ).forEach( function ( control ) {
+		control.addEventListener( 'click', function ( event ) {
+			const message = control.getAttribute( 'data-indexlane-rila-confirm' );
+			if ( message && ! window.confirm( message ) ) {
+				event.preventDefault();
+			}
+		} );
+	} );
+
 	render();
 	scheduleBatch();
 }() );

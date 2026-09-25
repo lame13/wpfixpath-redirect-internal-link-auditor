@@ -8,6 +8,10 @@
 declare(strict_types=1);
 
 define( 'ABSPATH', __DIR__ . '/' );
+define( 'MINUTE_IN_SECONDS', 60 );
+define( 'HOUR_IN_SECONDS', 3600 );
+define( 'DAY_IN_SECONDS', 86400 );
+define( 'WEEK_IN_SECONDS', 604800 );
 
 $GLOBALS['indexlane_test_http_calls'] = array();
 $GLOBALS['indexlane_test_responses']  = array();
@@ -23,6 +27,22 @@ $GLOBALS['indexlane_test_styles']       = array();
 $GLOBALS['indexlane_test_scripts']      = array();
 $GLOBALS['indexlane_test_localizations'] = array();
 $GLOBALS['indexlane_test_plugin_url_files'] = array();
+$GLOBALS['indexlane_test_options'] = array(
+	'admin_email' => 'admin@example.test',
+	'date_format' => 'Y-m-d',
+	'time_format' => 'H:i',
+	'blogname'    => 'Example Site',
+);
+$GLOBALS['indexlane_test_posts']            = array();
+$GLOBALS['indexlane_test_post_writes']      = array();
+$GLOBALS['indexlane_test_revisions']        = array();
+$GLOBALS['indexlane_test_post_meta']        = array();
+$GLOBALS['indexlane_test_menu_items']       = array();
+$GLOBALS['indexlane_test_block_templates']  = array();
+$GLOBALS['indexlane_test_mail']             = array();
+$GLOBALS['indexlane_test_cron']             = array();
+$GLOBALS['indexlane_test_cron_schedules']   = array();
+$GLOBALS['indexlane_test_redirects']        = array();
 
 class WP_Error {
 	/** @var string */
@@ -169,6 +189,12 @@ function wp_strip_all_tags( string $value ): string {
 function absint( $value ): int {
 	return abs( (int) $value );
 }
+function wp_slash( $value ) {
+	return is_array( $value ) ? array_map( 'wp_slash', $value ) : ( is_string( $value ) ? addslashes( $value ) : $value );
+}
+function wp_unslash( $value ) {
+	return is_array( $value ) ? array_map( 'wp_unslash', $value ) : ( is_string( $value ) ? stripslashes( $value ) : $value );
+}
 function wp_json_encode( $value, int $flags = 0 ) {
 	return json_encode( $value, $flags );
 }
@@ -267,6 +293,160 @@ function delete_transient( string $key ): bool {
 		return false;
 	}
 	unset( $GLOBALS['indexlane_test_transients'][ $key ] );
+	return true;
+}
+
+function get_option( string $option, $default = false ) {
+	return array_key_exists( $option, $GLOBALS['indexlane_test_options'] )
+		? $GLOBALS['indexlane_test_options'][ $option ]
+		: $default;
+}
+function add_option( string $option, $value, $deprecated = '', $autoload = null ): bool {
+	if ( array_key_exists( $option, $GLOBALS['indexlane_test_options'] ) ) { return false; }
+	$GLOBALS['indexlane_test_options'][ $option ] = $value;
+	return true;
+}
+function update_option( string $option, $value, $autoload = null ): bool {
+	if ( ! empty( $GLOBALS['indexlane_test_fail_options'][ $option ] ) ) { return false; }
+	if ( array_key_exists( $option, $GLOBALS['indexlane_test_options'] ) && $GLOBALS['indexlane_test_options'][ $option ] === $value ) { return false; }
+	$GLOBALS['indexlane_test_options'][ $option ] = $value;
+	return true;
+}
+function delete_option( string $option ): bool {
+	if ( ! array_key_exists( $option, $GLOBALS['indexlane_test_options'] ) ) {
+		return false;
+	}
+	unset( $GLOBALS['indexlane_test_options'][ $option ] );
+	return true;
+}
+function get_post( $post_id ) {
+	$post_id = (int) $post_id;
+	return isset( $GLOBALS['indexlane_test_posts'][ $post_id ] ) ? $GLOBALS['indexlane_test_posts'][ $post_id ] : null;
+}
+function wp_update_post( array $postarr, bool $wp_error = false ) {
+	$post_id = isset( $postarr['ID'] ) ? (int) $postarr['ID'] : 0;
+	if ( $post_id <= 0 || ! isset( $GLOBALS['indexlane_test_posts'][ $post_id ] ) ) {
+		return $wp_error ? new WP_Error( 'invalid_post', 'Missing post' ) : 0;
+	}
+	$GLOBALS['indexlane_test_post_writes'][] = $post_id;
+	if ( isset( $postarr['post_content'] ) ) {
+		$GLOBALS['indexlane_test_posts'][ $post_id ]->post_content = wp_unslash( (string) $postarr['post_content'] );
+	}
+	return $post_id;
+}
+function wp_get_post_revisions( $post_id, array $args = array() ) {
+	$post_id = (int) $post_id;
+	return isset( $GLOBALS['indexlane_test_revisions'][ $post_id ] ) ? $GLOBALS['indexlane_test_revisions'][ $post_id ] : array();
+}
+function get_post_meta( $post_id, string $key = '', bool $single = false ) {
+	$post_id = (int) $post_id;
+	if ( ! isset( $GLOBALS['indexlane_test_post_meta'][ $post_id ] ) ) {
+		return '' === $key || $single ? '' : array();
+	}
+	$meta = $GLOBALS['indexlane_test_post_meta'][ $post_id ];
+	if ( '' === $key ) {
+		return $single ? '' : $meta;
+	}
+	if ( ! array_key_exists( $key, $meta ) ) {
+		return $single ? '' : array();
+	}
+	return $single ? $meta[ $key ] : array( $meta[ $key ] );
+}
+function update_post_meta( $post_id, string $key, $value ) {
+	$post_id = (int) $post_id;
+	$GLOBALS['indexlane_test_post_meta'][ $post_id ][ $key ] = wp_unslash( $value );
+	return true;
+}
+function wp_get_nav_menu_items( $menu ) {
+	$menu_id = is_object( $menu ) && isset( $menu->term_id ) ? (int) $menu->term_id : (int) $menu;
+	return isset( $GLOBALS['indexlane_test_menu_items'][ $menu_id ] ) ? $GLOBALS['indexlane_test_menu_items'][ $menu_id ] : array();
+}
+function get_block_template( $id, string $template_type = 'wp_template' ) {
+	$key = $template_type . ':' . (string) $id;
+	return isset( $GLOBALS['indexlane_test_block_templates'][ $key ] ) ? $GLOBALS['indexlane_test_block_templates'][ $key ] : null;
+}
+function add_query_arg( ...$args ) {
+	if ( is_array( $args[0] ) ) {
+		$query = $args[0];
+		$url = isset( $args[1] ) ? $args[1] : '';
+	} else {
+		$query = array( $args[0] => $args[1] );
+		$url = isset( $args[2] ) ? $args[2] : '';
+	}
+	return $url . ( false === strpos( $url, '?' ) ? '?' : '&' ) . http_build_query( $query );
+}
+function wp_nonce_field( string $action = '', string $name = '_wpnonce', bool $referer = true, bool $echo = true ): string {
+	$field = '<input type="hidden" name="' . $name . '" value="nonce" />';
+	if ( $echo ) {
+		echo $field;
+	}
+	return $field;
+}
+function checked( $checked, $current = true, bool $echo = true ): string {
+	$result = (string) $checked === (string) $current || ( true === $checked && true === $current ) ? ' checked="checked"' : '';
+	if ( $echo ) {
+		echo $result;
+	}
+	return $result;
+}
+function selected( $selected, $current = true, bool $echo = true ): string {
+	$result = (string) $selected === (string) $current || ( true === $selected && true === $current ) ? ' selected="selected"' : '';
+	if ( $echo ) {
+		echo $result;
+	}
+	return $result;
+}
+function esc_textarea( $text ): string {
+	return htmlspecialchars( (string) $text, ENT_QUOTES, 'UTF-8' );
+}
+function is_email( $email ): bool {
+	return is_string( $email ) && false !== strpos( $email, '@' );
+}
+function human_time_diff( int $from, int $to = 0 ): string {
+	return '2 hours';
+}
+function date_i18n( string $format, int $timestamp = 0 ): string {
+	return gmdate( $format, $timestamp );
+}
+function wp_mail( $to, string $subject, string $message, $headers = '', $attachments = array() ): bool {
+	$GLOBALS['indexlane_test_mail'][] = array(
+		'to'      => $to,
+		'subject' => $subject,
+		'message' => $message,
+	);
+	return true;
+}
+function wp_next_scheduled( string $hook, array $args = array() ) {
+	return isset( $GLOBALS['indexlane_test_cron'][ $hook ] ) ? $GLOBALS['indexlane_test_cron'][ $hook ] : false;
+}
+function wp_schedule_event( int $timestamp, string $recurrence, string $hook, array $args = array() ): bool {
+	$GLOBALS['indexlane_test_cron'][ $hook ] = $timestamp;
+	$GLOBALS['indexlane_test_cron_schedules'][ $hook ] = $recurrence;
+	return true;
+}
+function wp_schedule_single_event( int $timestamp, string $hook, array $args = array() ): bool {
+	$GLOBALS['indexlane_test_cron'][ $hook ] = $timestamp;
+	return true;
+}
+function wp_clear_scheduled_hook( string $hook, array $args = array() ): int {
+	if ( ! isset( $GLOBALS['indexlane_test_cron'][ $hook ] ) ) {
+		return 0;
+	}
+	unset( $GLOBALS['indexlane_test_cron'][ $hook ], $GLOBALS['indexlane_test_cron_schedules'][ $hook ] );
+	return 1;
+}
+function wp_get_scheduled_event( string $hook, array $args = array(), $timestamp = null ) {
+	if ( ! isset( $GLOBALS['indexlane_test_cron'][ $hook ] ) ) {
+		return false;
+	}
+	$event           = new stdClass();
+	$event->hook     = $hook;
+	$event->schedule = isset( $GLOBALS['indexlane_test_cron_schedules'][ $hook ] ) ? $GLOBALS['indexlane_test_cron_schedules'][ $hook ] : false;
+	return $event;
+}
+function wp_add_dashboard_widget( string $widget_id, string $widget_name, $callback ): void {}
+function wp_safe_redirect( string $location, int $status = 302 ): bool {
+	$GLOBALS['indexlane_test_redirects'][] = $location;
 	return true;
 }
 
@@ -1190,7 +1370,7 @@ $baseline = indexlane_invoke( 'build_baseline_from_session', array( $baseline_se
 indexlane_assert_same( false, is_wp_error( $baseline ), 'A complete consistent scan must produce portable baseline evidence.' );
 indexlane_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'Baseline JSON must identify its document format.' );
 indexlane_assert_same( 3, $baseline['schema_version'], 'Baseline JSON must carry an explicit destination-intent schema version.' );
-indexlane_assert_same( '0.7.0', $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
+indexlane_assert_same( $release_version, $baseline['plugin_version'], 'Saved-scan metadata must identify the plugin version.' );
 indexlane_assert_same( 'https://example.test', $baseline['site_url'], 'Baseline site ownership must use a normalized exact home URL.' );
 indexlane_assert_same( true, $baseline['completion']['complete'], 'Only complete evidence may be saved as a baseline.' );
 indexlane_assert_same( 0, $baseline['completion']['request_allowance_extensions'], 'Baseline metadata must preserve the request-limit extension state.' );
@@ -1766,5 +1946,511 @@ $comparison_html = (string) ob_get_clean();
 indexlane_assert_same( true, false !== strpos( $comparison_html, 'Page intent' ), 'The comparison details must name the page-intent evidence.' );
 indexlane_assert_same( true, false !== strpos( $comparison_html, 'noindex robots meta tag' ), 'The comparison details must show the latest intent evidence.' );
 indexlane_assert_same( true, false !== strpos( $comparison_html, 'page intent' ), 'A changed intent must be named among the changed fields.' );
+
+// ---------------------------------------------------------------------------
+// 1.0.0: in-place repair, acknowledgement, and scheduled monitoring.
+// ---------------------------------------------------------------------------
+
+$fix_base = 'https://example.test/about/';
+
+$replacement = indexlane_invoke(
+	'replace_stored_link_url',
+	array(
+		'<p><a href="https://example.test/old-page/">Old</a></p>',
+		'https://example.test/old-page/',
+		'https://example.test/new-page/',
+		$fix_base,
+	)
+);
+indexlane_assert_same( 1, $replacement['replacements'], 'An exact absolute href must be replaced once.' );
+indexlane_assert_same(
+	'<p><a href="https://example.test/new-page/">Old</a></p>',
+	$replacement['content'],
+	'Replacing an absolute href must leave the rest of the markup untouched.'
+);
+
+$replacement = indexlane_invoke(
+	'replace_stored_link_url',
+	array(
+		'<a href="/old-page/">Relative</a>',
+		'https://example.test/old-page/',
+		'https://example.test/new-page/',
+		$fix_base,
+	)
+);
+indexlane_assert_same(
+	'<a href="/new-page/">Relative</a>',
+	$replacement['content'],
+	'A site-relative stored link must stay site-relative after a repair.'
+);
+
+$replacement = indexlane_invoke(
+	'replace_stored_link_url',
+	array(
+		'<a href="/pricing/">Plans</a><a href="/pricing/#enterprise">Enterprise</a>',
+		'https://example.test/pricing/#enterprise',
+		'https://example.test/pricing/#teams',
+		$fix_base,
+	)
+);
+indexlane_assert_same( 1, $replacement['replacements'], 'Only the link carrying the matching fragment may be replaced.' );
+indexlane_assert_same(
+	'<a href="/pricing/">Plans</a><a href="/pricing/#teams">Enterprise</a>',
+	$replacement['content'],
+	'A fragment-specific repair must not rewrite the fragment-free link to the same page.'
+);
+
+$replacement = indexlane_invoke(
+	'replace_stored_link_url',
+	array(
+		'<p>See https://example.test/old-page/ for the details.</p>',
+		'https://example.test/old-page/',
+		'https://example.test/new-page/',
+		$fix_base,
+	)
+);
+indexlane_assert_same( 0, $replacement['replacements'], 'A URL in visible text must never be rewritten by a link repair.' );
+
+$replacement = indexlane_invoke(
+	'replace_stored_link_url',
+	array(
+		'<img src="https://example.test/old-page/?a=1&amp;b=2" />',
+		'https://example.test/old-page/?a=1&b=2',
+		'https://example.test/new-page/?a=1&b=2',
+		$fix_base,
+	)
+);
+indexlane_assert_same( 1, $replacement['replacements'], 'An entity-encoded src attribute must be matched and replaced.' );
+indexlane_assert_same(
+	'<img src="https://example.test/new-page/?a=1&amp;b=2" />',
+	$replacement['content'],
+	'A replacement inside an attribute must stay entity-encoded.'
+);
+
+$replacement = indexlane_invoke(
+	'replace_stored_link_url',
+	array(
+		'<!-- wp:navigation-link {"label":"Old","url":"https://example.test/old-page/"} /-->',
+		'https://example.test/old-page/',
+		'https://example.test/new-page/',
+		$fix_base,
+	)
+);
+indexlane_assert_same( 1, $replacement['replacements'], 'A stored block url attribute must be replaced.' );
+indexlane_assert_same(
+	'<!-- wp:navigation-link {"label":"Old","url":"https://example.test/new-page/"} /-->',
+	$replacement['content'],
+	'A block attribute repair must keep the stored JSON valid.'
+);
+
+$replacement = indexlane_invoke(
+	'replace_stored_link_url',
+	array(
+		'<a href="https://example.test/old-page-extra/">Not this one</a>',
+		'https://example.test/old-page/',
+		'https://example.test/new-page/',
+		$fix_base,
+	)
+);
+indexlane_assert_same( 0, $replacement['replacements'], 'A different URL must never be rewritten.' );
+
+indexlane_assert_same(
+	false,
+	indexlane_invoke( 'fix_destination_key', array( 'https://example.test/pricing/' ) ) === indexlane_invoke( 'fix_destination_key', array( 'https://example.test/pricing/#enterprise' ) ),
+	'A linked fragment must be part of the repair identity.'
+);
+
+$broken_row      = indexlane_result_row( 'https://example.test/about', 'https://example.test/retired-page/', '404', 0, 'https://example.test/retired-page/', 'Broken link (404)', 'Error' );
+$redirect_row    = indexlane_result_row( 'https://example.test/about', 'https://example.test/old-service/', '301 -> 200', 1, 'https://example.test/services/', 'Redirect (301)', 'Warning' );
+$healthy_row     = indexlane_result_row( 'https://example.test/about', 'https://example.test/services/', '200', 0, 'https://example.test/services/', 'None', 'OK' );
+$fix_candidates  = indexlane_invoke( 'build_fix_candidates', array( array( $broken_row, $redirect_row, $healthy_row ) ) );
+indexlane_assert_same( 2, count( $fix_candidates ), 'Repairable destinations must exclude healthy results.' );
+$fix_candidates_by_url = array();
+foreach ( $fix_candidates as $fix_candidate ) {
+	$fix_candidates_by_url[ $fix_candidate['from_url'] ] = $fix_candidate;
+}
+indexlane_assert_same( 'https://example.test/retired-page/', $fix_candidates[0]['from_url'], 'The most actionable destination must sort first.' );
+indexlane_assert_same( 'https://example.test/services/', $fix_candidates_by_url['https://example.test/old-service/']['suggestion'], 'A redirect must suggest the final URL that returned a success status.' );
+indexlane_assert_same( '', $fix_candidates_by_url['https://example.test/retired-page/']['suggestion'], 'A broken URL without a published target must not invent a suggestion.' );
+
+$GLOBALS['indexlane_test_posts'][11]              = (object) array(
+	'ID'           => 11,
+	'post_type'    => 'page',
+	'post_content' => '<p><a href="/retired-page/">Old</a></p>',
+);
+$GLOBALS['indexlane_test_posts'][11]->post_status = 'publish';
+
+$repair_row  = array_merge(
+	$broken_row,
+	array(
+		'source_key'        => 'content:page:11',
+		'source_content_id' => 11,
+		'source_id'         => 11,
+	)
+);
+$repair_scan = array(
+	'id'      => '12345678-1234-4abc-8def-0000000000f1',
+	'status'  => 'complete',
+	'results' => array( $repair_row ),
+);
+
+$plan = indexlane_invoke( 'build_fix_plan', array( $repair_scan, 'https://example.test/retired-page/', 'https://example.test/contact/' ) );
+indexlane_assert_same( 1, count( $plan['items'] ), 'A repair plan must resolve the stored content item.' );
+indexlane_assert_same( '<p><a href="/retired-page/">Old</a></p>', $plan['items'][0]['before'], 'The plan must record the exact previous stored value.' );
+indexlane_assert_same( '<p><a href="/contact/">Old</a></p>', $plan['items'][0]['after'], 'The plan must record the exact new stored value.' );
+indexlane_assert_same( 1, $plan['occurrences'], 'The plan must count the link occurrences it will change.' );
+
+$applied = indexlane_invoke( 'apply_fix_plan', array( $plan ) );
+indexlane_assert_same( 1, $applied['sources'], 'Applying a plan must report the changed source count.' );
+indexlane_assert_same( '<p><a href="/contact/">Old</a></p>', $GLOBALS['indexlane_test_posts'][11]->post_content, 'Applying a repair must write the new stored value.' );
+indexlane_assert_same( 1, count( $GLOBALS['indexlane_test_post_writes'] ), 'A repair must write through the WordPress post API exactly once.' );
+
+$journal = indexlane_invoke( 'get_fix_journal' );
+indexlane_assert_same( 1, count( $journal['batches'] ), 'A repair must record one reversible journal batch.' );
+indexlane_assert_same( 'applied', $journal['batches'][0]['status'], 'A recorded repair must start as applied.' );
+
+$undo = indexlane_invoke( 'undo_fix_batch', array( $applied['batch_id'] ) );
+indexlane_assert_same( 1, $undo['restored'], 'Undo must restore the recorded source.' );
+indexlane_assert_same( '<p><a href="/retired-page/">Old</a></p>', $GLOBALS['indexlane_test_posts'][11]->post_content, 'Undo must restore the exact previous stored value.' );
+indexlane_assert_same( 'undone', indexlane_invoke( 'get_fix_journal' )['batches'][0]['status'], 'An undone repair must be marked as undone.' );
+
+$applied_again = indexlane_invoke( 'apply_fix_plan', array( $plan ) );
+$GLOBALS['indexlane_test_posts'][11]->post_content = '<p>Edited by hand afterwards.</p>';
+$blocked_undo  = indexlane_invoke( 'undo_fix_batch', array( $applied_again['batch_id'] ) );
+indexlane_assert_same( true, is_wp_error( $blocked_undo ), 'Undo must refuse to overwrite content edited after the repair.' );
+indexlane_assert_same( 'fix_undo_nothing', $blocked_undo->get_error_code(), 'Undo must report why nothing was restored.' );
+indexlane_assert_same( '<p>Edited by hand afterwards.</p>', $GLOBALS['indexlane_test_posts'][11]->post_content, 'A refused undo must leave the later edit in place.' );
+
+$GLOBALS['indexlane_test_menu_items'][3] = array(
+	(object) array(
+		'ID'    => 101,
+		'title' => 'Contact',
+		'url'   => 'https://example.test/retired-contact/',
+		'type'  => 'custom',
+	),
+);
+$GLOBALS['indexlane_test_post_meta'][101]['_menu_item_url'] = 'https://example.test/retired-contact/';
+
+$menu_row = array_merge(
+	$broken_row,
+	array(
+		'source_key'      => 'menu:3',
+		'source_type_code' => 'menu',
+		'source_id'       => 3,
+		'source_title'    => 'Footer links',
+		'source_type'     => 'Classic menu',
+		'source_context'  => 'shared',
+		'linked_url'      => 'https://example.test/retired-contact/',
+	)
+);
+
+$menu_plan = indexlane_invoke(
+	'build_fix_plan',
+	array(
+		array(
+			'id'      => '12345678-1234-4abc-8def-0000000000f2',
+			'status'  => 'complete',
+			'results' => array( $menu_row ),
+		),
+		'https://example.test/retired-contact/',
+		'https://example.test/contact/',
+	)
+);
+indexlane_assert_same( 1, count( $menu_plan['items'] ), 'A menu link stored as a custom URL must be repairable.' );
+indexlane_assert_same( 'menu_item_url', $menu_plan['items'][0]['storage'], 'A classic menu repair must target the stored menu item URL.' );
+$menu_applied = indexlane_invoke( 'apply_fix_plan', array( $menu_plan ) );
+indexlane_assert_same( 'https://example.test/contact/', $GLOBALS['indexlane_test_post_meta'][101]['_menu_item_url'], 'Applying a menu repair must store the new menu item URL.' );
+indexlane_invoke( 'undo_fix_batch', array( $menu_applied['batch_id'] ) );
+indexlane_assert_same( 'https://example.test/retired-contact/', $GLOBALS['indexlane_test_post_meta'][101]['_menu_item_url'], 'Undoing a menu repair must restore the previous URL.' );
+
+$GLOBALS['indexlane_test_menu_items'][4] = array(
+	(object) array(
+		'ID'    => 102,
+		'title' => 'Contact page',
+		'url'   => 'https://example.test/retired-contact/',
+		'type'  => 'post_type',
+	),
+);
+$object_menu_row = array_merge( $menu_row, array( 'source_key' => 'menu:4', 'source_id' => 4 ) );
+$object_plan     = indexlane_invoke(
+	'build_fix_plan',
+	array(
+		array(
+			'id'      => '12345678-1234-4abc-8def-0000000000f3',
+			'status'  => 'complete',
+			'results' => array( $object_menu_row ),
+		),
+		'https://example.test/retired-contact/',
+		'https://example.test/contact/',
+	)
+);
+indexlane_assert_same( true, is_wp_error( $object_plan ), 'A menu item that follows a WordPress object must not be rewritten as a custom URL.' );
+indexlane_assert_same( 'fix_nothing_editable', $object_plan->get_error_code(), 'The plan must explain that no editable source was found.' );
+
+$GLOBALS['indexlane_test_block_templates']['wp_template_part:theme//footer'] = (object) array(
+	'id'    => 'theme//footer',
+	'title' => 'Footer',
+	'slug'  => 'footer',
+);
+$theme_part_row = array_merge(
+	$broken_row,
+	array(
+		'source_key'       => 'template_part:theme//footer',
+		'source_type_code' => 'template_part',
+		'source_id'        => 0,
+		'source_title'     => 'Footer',
+		'source_type'      => 'Template part',
+		'source_context'   => 'shared',
+	)
+);
+$theme_part_plan = indexlane_invoke(
+	'build_fix_plan',
+	array(
+		array(
+			'id'      => '12345678-1234-4abc-8def-0000000000f4',
+			'status'  => 'complete',
+			'results' => array( $theme_part_row ),
+		),
+		'https://example.test/retired-page/',
+		'https://example.test/contact/',
+	)
+);
+indexlane_assert_same( true, is_wp_error( $theme_part_plan ), 'A theme-file template part must not be offered as repairable.' );
+
+// Acknowledged issues keep a known problem out of the attention count.
+$GLOBALS['indexlane_test_options']['indexlane_rila_ignored_issues'] = array( 'items' => array() );
+
+$ack_row   = indexlane_result_row( 'https://example.test/about', 'https://example.test/known-broken/', '404', 0, 'https://example.test/known-broken/', 'Broken link (404)', 'Error' );
+$ack_key   = indexlane_invoke( 'issue_key_for_row', array( $ack_row ) );
+$ack_counts = indexlane_invoke( 'issue_url_counts', array( array( $ack_row ) ) );
+indexlane_assert_same( 1, $ack_counts['active'], 'A fresh problem must count as actionable.' );
+indexlane_assert_same( 0, $ack_counts['acknowledged'], 'A fresh problem must not be acknowledged.' );
+
+indexlane_invoke(
+	'save_acknowledged_issues',
+	array(
+		array(
+			$ack_key => array(
+				'url'  => 'https://example.test/known-broken/',
+				'code' => 'error',
+				'at'   => time(),
+			),
+		),
+	)
+);
+$ack_counts = indexlane_invoke( 'issue_url_counts', array( array( $ack_row ) ) );
+indexlane_assert_same( 0, $ack_counts['active'], 'An acknowledged problem must leave the attention count.' );
+indexlane_assert_same( 1, $ack_counts['acknowledged'], 'An acknowledged problem must be counted separately.' );
+indexlane_assert_same( 1, $ack_counts['total'], 'Acknowledgement must not hide the evidence itself.' );
+indexlane_assert_same( true, indexlane_invoke( 'is_row_acknowledged', array( $ack_row, indexlane_invoke( 'get_acknowledged_issues' ) ) ), 'A stored acknowledgement must match its own result row.' );
+
+$other_code_row = array_merge( $ack_row, array( 'result' => 'Warning', 'result_code' => 'warning' ) );
+indexlane_assert_same( false, indexlane_invoke( 'is_row_acknowledged', array( $other_code_row, indexlane_invoke( 'get_acknowledged_issues' ) ) ), 'A URL whose outcome changed must return to the attention list.' );
+
+indexlane_invoke( 'save_acknowledged_issues', array( array() ) );
+$ack_counts = indexlane_invoke( 'issue_url_counts', array( array( $ack_row ) ) );
+indexlane_assert_same( 1, $ack_counts['active'], 'Restoring an acknowledged problem must return it to the attention count.' );
+
+// Scheduled monitoring.
+$GLOBALS['indexlane_test_options']['indexlane_rila_monitor'] = array();
+$GLOBALS['indexlane_test_cron']                              = array();
+$GLOBALS['indexlane_test_cron_schedules']                    = array();
+$GLOBALS['indexlane_test_mail']                              = array();
+
+$monitor_defaults = indexlane_invoke( 'get_monitor_config' );
+indexlane_assert_same( false, $monitor_defaults['enabled'], 'Scheduled monitoring must start turned off.' );
+indexlane_assert_same( 'daily', $monitor_defaults['schedule'], 'Scheduled monitoring must default to a daily check.' );
+indexlane_assert_same( 2000, $monitor_defaults['request_limit'], 'Scheduled monitoring must carry an explicit request limit.' );
+indexlane_assert_same( 'all', indexlane_invoke( 'monitor_scan_settings', array( $monitor_defaults ) )['content_scope'], 'The default scheduled scope must cover all published content.' );
+
+indexlane_assert_same( 'daily', indexlane_invoke( 'sanitize_monitor_schedule', array( 'nonsense' ) ), 'An unsupported recurrence must fall back to daily.' );
+indexlane_assert_same( 'weekly', indexlane_invoke( 'sanitize_monitor_schedule', array( 'weekly' ) ), 'A supported recurrence must be kept.' );
+indexlane_assert_same( array( 'admin@example.test' ), indexlane_invoke( 'parse_monitor_recipients', array( '' ) ), 'An empty recipient list must fall back to the site administration address.' );
+indexlane_assert_same( array( 'a@example.test', 'c@example.test' ), indexlane_invoke( 'parse_monitor_recipients', array( 'a@example.test, not-an-email, c@example.test' ) ), 'Invalid recipient entries must be dropped.' );
+
+indexlane_invoke( 'sync_monitor_schedule' );
+indexlane_assert_same( false, wp_next_scheduled( 'indexlane_rila_monitor_run' ), 'A turned-off schedule must not register a cron event.' );
+
+$monitor_config              = indexlane_invoke( 'get_monitor_config' );
+$monitor_config['enabled']   = true;
+$monitor_config['schedule']  = 'weekly';
+indexlane_invoke( 'save_monitor_config', array( $monitor_config ) );
+indexlane_invoke( 'sync_monitor_schedule' );
+indexlane_assert_same( true, false !== wp_next_scheduled( 'indexlane_rila_monitor_run' ), 'An enabled schedule must register a cron event.' );
+indexlane_assert_same( 'weekly', $GLOBALS['indexlane_test_cron_schedules']['indexlane_rila_monitor_run'], 'The cron event must use the configured recurrence.' );
+
+$monitor_config['schedule'] = 'daily';
+indexlane_invoke( 'save_monitor_config', array( $monitor_config ) );
+indexlane_invoke( 'sync_monitor_schedule' );
+indexlane_assert_same( 'daily', $GLOBALS['indexlane_test_cron_schedules']['indexlane_rila_monitor_run'], 'Changing the recurrence must reschedule the cron event.' );
+
+$monitor_config['enabled'] = false;
+indexlane_invoke( 'save_monitor_config', array( $monitor_config ) );
+indexlane_invoke( 'sync_monitor_schedule' );
+indexlane_assert_same( false, wp_next_scheduled( 'indexlane_rila_monitor_run' ), 'Turning the schedule off must clear the cron event.' );
+
+$monitor_session = array(
+	'id'      => '12345678-1234-4abc-8def-0000000000m1',
+	'status'  => 'complete',
+	'stats'   => array( 'sources_processed' => 12 ),
+	'results' => array( $broken_row, $redirect_row ),
+);
+
+$notify_config            = indexlane_invoke( 'get_monitor_config' );
+$notify_config['enabled'] = true;
+indexlane_invoke( 'save_monitor_config', array( $notify_config ) );
+$notify_config = indexlane_invoke( 'get_monitor_config' );
+
+indexlane_invoke( 'evaluate_monitor_results', array( $notify_config, $monitor_session ) );
+indexlane_assert_same( 1, count( $GLOBALS['indexlane_test_mail'] ), 'The first scheduled check must email an initial summary.' );
+
+$notify_config = indexlane_invoke( 'get_monitor_config' );
+indexlane_assert_same( true, $notify_config['has_baseline'], 'A completed scheduled check must establish the comparison baseline.' );
+indexlane_assert_same( 2, count( $notify_config['issues'] ), 'The scheduled check must keep one identity per unacknowledged URL problem.' );
+indexlane_assert_same( 2, (int) $notify_config['last_run']['active'], 'The scheduled summary must report the actionable URL count.' );
+
+indexlane_invoke( 'evaluate_monitor_results', array( $notify_config, $monitor_session ) );
+indexlane_assert_same( 1, count( $GLOBALS['indexlane_test_mail'] ), 'An unchanged scheduled check must not send another email.' );
+
+$changed_session            = $monitor_session;
+$changed_session['results'] = array( $broken_row, $redirect_row, $healthy_row, $ack_row );
+indexlane_invoke( 'evaluate_monitor_results', array( $notify_config, $changed_session ) );
+indexlane_assert_same( 2, count( $GLOBALS['indexlane_test_mail'] ), 'A newly detected problem must send one notification.' );
+
+$notify_config = indexlane_invoke( 'get_monitor_config' );
+indexlane_assert_same( 1, (int) $notify_config['last_run']['new'], 'The notification must name the count of new problems.' );
+indexlane_assert_same( 3, (int) $notify_config['last_run']['active'], 'The notification must exclude healthy results from the actionable count.' );
+
+indexlane_invoke(
+	'save_acknowledged_issues',
+	array(
+		array(
+			indexlane_invoke( 'issue_key_for_row', array( $broken_row ) ) => array(
+				'url'  => 'https://example.test/retired-page/',
+				'code' => 'error',
+				'at'   => time(),
+			),
+		),
+	)
+);
+indexlane_invoke( 'evaluate_monitor_results', array( $notify_config, $changed_session ) );
+$acknowledged_run = indexlane_invoke( 'get_monitor_config' );
+indexlane_assert_same( 2, (int) $acknowledged_run['last_run']['active'], 'An acknowledged problem must be excluded from the scheduled check count.' );
+indexlane_assert_same( 1, (int) $acknowledged_run['last_run']['acknowledged'], 'The scheduled check must report acknowledged problems separately.' );
+indexlane_assert_same( 2, count( $GLOBALS['indexlane_test_mail'] ), 'Acknowledging a known problem must not send a notification by itself.' );
+
+$GLOBALS['indexlane_test_options']['indexlane_rila_ignored_issues'] = array( 'items' => array() );
+$resolved_config = indexlane_invoke( 'get_monitor_config' );
+indexlane_invoke( 'evaluate_monitor_results', array( $resolved_config, array_merge( $monitor_session, array( 'results' => array( $healthy_row ) ) ) ) );
+indexlane_assert_same( 3, count( $GLOBALS['indexlane_test_mail'] ), 'Resolving every previous problem must send one notification.' );
+$resolved_run = indexlane_invoke( 'get_monitor_config' );
+indexlane_assert_same( 3, (int) $resolved_run['last_run']['resolved'], 'The notification must name the resolved count.' );
+indexlane_assert_same( 0, (int) $resolved_run['last_run']['active'], 'A clean scheduled check must report no actionable URLs.' );
+
+indexlane_assert_same( 'Off', indexlane_invoke( 'monitor_status_label', array( array( 'enabled' => false, 'last_run' => array() ) ) ), 'A turned-off schedule must be described as off.' );
+indexlane_assert_same( true, false !== strpos( indexlane_invoke( 'monitor_status_label', array( array( 'enabled' => true, 'last_run' => array( 'at' => time(), 'status' => 'complete' ) ) ) ), 'last check' ), 'A running schedule must describe when it last ran.' );
+
+$GLOBALS['indexlane_test_options']['indexlane_rila_monitor'] = array( 'enabled' => false );
+$health_disabled = indexlane_invoke( 'site_health_monitor_test', array() );
+indexlane_assert_same( 'recommended', $health_disabled['status'], 'Site Health must recommend turning the schedule on.' );
+indexlane_assert_same( 'indexlane_rila_monitor', $health_disabled['test'], 'The Site Health check must identify itself stably.' );
+
+$GLOBALS['indexlane_test_options']['indexlane_rila_monitor'] = array(
+	'enabled'       => true,
+	'schedule'      => 'daily',
+	'recipients'    => '',
+	'request_limit' => 2000,
+	'has_baseline'  => true,
+	'issues'        => array(),
+	'last_run'      => array(
+		'at'           => time(),
+		'status'       => 'complete',
+		'total'        => 3,
+		'active'       => 2,
+		'acknowledged' => 1,
+		'new'          => 1,
+		'resolved'     => 0,
+	),
+);
+$health_enabled = indexlane_invoke( 'site_health_monitor_test', array() );
+indexlane_assert_same( 'good', $health_enabled['status'], 'Site Health must report a running schedule as good.' );
+indexlane_assert_same( true, false !== strpos( $health_enabled['label'], 'is running' ), 'Site Health must describe the running schedule.' );
+
+$health_tests = indexlane_invoke( 'register_site_health_test', array( array( 'direct' => array() ) ) );
+indexlane_assert_same( true, isset( $health_tests['direct']['indexlane_rila_monitor'] ), 'The plugin must register one Site Health test.' );
+
+ob_start();
+indexlane_invoke( 'render_monitor_panel', array() );
+$monitor_panel_html = (string) ob_get_clean();
+indexlane_assert_same( true, false !== strpos( $monitor_panel_html, 'Keep it clean' ), 'The admin page must explain the scheduled check.' );
+indexlane_assert_same( true, false !== strpos( $monitor_panel_html, 'monitor_schedule' ), 'The admin page must expose the recurrence control.' );
+
+ob_start();
+indexlane_invoke( 'render_fix_panel', array( $repair_scan ) );
+$fix_panel_html = (string) ob_get_clean();
+indexlane_assert_same( true, false !== strpos( $fix_panel_html, 'Fix links' ), 'The admin page must expose the repair panel.' );
+indexlane_assert_same( true, false !== strpos( $fix_panel_html, 'Recent repairs' ), 'The admin page must expose the reversible repair history.' );
+
+ob_start();
+indexlane_invoke( 'render_destination_impact', array( $intent_impact, array() ) );
+$impact_html = (string) ob_get_clean();
+indexlane_assert_same( true, false !== strpos( $impact_html, 'Acknowledge' ), 'Every problem URL must offer acknowledgement.' );
+
+// WP-CLI argument parsing and reporting helpers.
+$cli_defaults = indexlane_invoke( 'cli_scan_settings', array( array() ) );
+indexlane_assert_same( array_keys( indexlane_invoke( 'get_available_source_types', array() ) ), $cli_defaults['source_types'], 'A command-line scan without --source-types must cover every provider.' );
+indexlane_assert_same( 'all', $cli_defaults['content_scope'], 'A command-line scan must default to all published content.' );
+indexlane_assert_same( 5.0, $cli_defaults['timeout'], 'Omitting --timeout must keep the default request timeout.' );
+indexlane_assert_same( 5, $cli_defaults['max_redirects'], 'Omitting --max-redirects must keep the default redirect limit.' );
+
+$cli_explicit = indexlane_invoke(
+	'cli_scan_settings',
+	array(
+		array(
+			'source-types'    => 'content,menu',
+			'post-types'      => 'page',
+			'content-scope'   => 'limit',
+			'max-posts'       => '25',
+			'old-domains'     => 'old.example.com',
+			'timeout'         => '8',
+		),
+	)
+);
+indexlane_assert_same( array( 'content', 'menu' ), $cli_explicit['source_types'], 'A command-line scan must honor --source-types.' );
+indexlane_assert_same( array( 'page' ), $cli_explicit['post_types'], 'A command-line scan must honor --post-types.' );
+indexlane_assert_same( 'limit', $cli_explicit['content_scope'], 'A command-line scan must honor --content-scope.' );
+indexlane_assert_same( 25, $cli_explicit['max_posts'], 'A command-line scan must honor --max-posts.' );
+indexlane_assert_same( 8.0, $cli_explicit['timeout'], 'A command-line scan must honor --timeout.' );
+indexlane_assert_same( array( 'old.example.com' ), $cli_explicit['old_domain_hosts'], 'A command-line scan must flag the supplied old domains.' );
+
+$cli_invalid = indexlane_invoke( 'cli_scan_settings', array( array( 'source-types' => 'nonsense' ) ) );
+indexlane_assert_same( true, is_wp_error( $cli_invalid ), 'A command-line scan with no usable source must fail.' );
+indexlane_assert_same( 'cli_no_sources', $cli_invalid->get_error_code(), 'The command-line failure must explain the missing source.' );
+
+$cli_rows = indexlane_invoke(
+	'cli_issue_rows',
+	array(
+		array(
+			'results' => array( $broken_row, $healthy_row ),
+		),
+		10,
+	)
+);
+indexlane_assert_same( 1, count( $cli_rows ), 'The command-line report must list only actionable URLs.' );
+indexlane_assert_same( 'https://example.test/retired-page/', $cli_rows[0]['url'], 'The command-line report must name the problem URL.' );
+indexlane_assert_same(
+	array( 'url', 'outcome', 'acknowledged', 'impact', 'occurrences', 'sources', 'http', 'final_url', 'page_intent' ),
+	array_keys( $cli_rows[0] ),
+	'The command-line report must carry the documented columns in order.'
+);
+
+$cli_undo_empty = indexlane_invoke( 'cli_undo', array( '' ) );
+indexlane_assert_same( true, is_wp_error( $cli_undo_empty ), 'Undo must fail clearly when nothing can be undone.' );
+
+$cli_repairs = indexlane_invoke( 'cli_repairs', array() );
+indexlane_assert_same( true, is_array( $cli_repairs ), 'The command-line repair list must be an array.' );
+indexlane_assert_same( 'batch_id', array_keys( $cli_repairs[0] )[0], 'The command-line repair list must expose the batch ID first.' );
+
+require __DIR__ . '/repair-regressions.php';
 
 fwrite( STDOUT, "All behavioral tests passed.\n" );

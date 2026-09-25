@@ -40,9 +40,11 @@ Unsaved results expire after 24 hours of inactivity. An explicitly saved scan re
 
 Open the source's editing link. For this demo, expand the **Contact** item in **Footer links**, replace `/retired-contact/` with the URL of the published **Contact** page (`/contact/`), and save the menu.
 
-These are your edits in WordPress. The auditor does not replace links or create redirects.
+You can also let IndexLane make that exact change. Under **Fix links** the broken `/retired-contact/` URL has a replacement field. Enter `https://example.test/contact/` and select **Preview changes**. IndexLane lists the **Footer links** menu, the exact stored value `https://example.test/retired-contact/`, and the exact new value before anything is written. Select **Apply changes** to write it, or **Cancel** to leave the site untouched.
 
-Leave the old service link in place for this example so the next scan can show both a resolved issue and one that still needs work.
+Every applied repair is listed under **Recent repairs** with an **Undo** button that restores the previous stored values. Undo skips any source you edited again after the repair, so manual work is never overwritten.
+
+The auditor never creates redirects, and it only replaces the exact URL you reviewed. Leave the old service link in place for this example so the next scan can show both a resolved issue and one that still needs work.
 
 ## 5. Check the fixes
 

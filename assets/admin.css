@@ -818,3 +818,142 @@
 		margin-left: 0;
 	}
 }
+
+.indexlane-rila-fix,
+.indexlane-rila-monitor {
+	margin: 32px 0 38px;
+}
+
+.indexlane-rila-fix > h2,
+.indexlane-rila-monitor > h2 {
+	margin-bottom: 6px;
+}
+
+.indexlane-rila-monitor-form {
+	max-width: 1080px;
+	margin-top: 12px;
+	padding: 8px 24px 20px;
+	border: 1px solid #c3c4c7;
+	background: #fff;
+	box-shadow: 0 1px 1px rgba( 0, 0, 0, 0.04 );
+}
+
+.indexlane-rila-monitor-status {
+	max-width: 1080px;
+}
+
+.indexlane-rila-monitor-summary,
+.indexlane-rila-fix-preview-summary {
+	display: grid;
+	grid-template-columns: repeat( 4, minmax( 150px, 1fr ) );
+	gap: 1px;
+	max-width: 980px;
+	margin: 12px 0 18px;
+	background: #dcdcde;
+	border: 1px solid #dcdcde;
+}
+
+.indexlane-rila-fix-preview-summary {
+	grid-template-columns: repeat( 2, minmax( 150px, 1fr ) );
+}
+
+.indexlane-rila-monitor-summary > div,
+.indexlane-rila-fix-preview-summary > div {
+	padding: 10px 14px;
+	background: #fff;
+}
+
+.indexlane-rila-monitor-summary dt,
+.indexlane-rila-fix-preview-summary dt {
+	margin-bottom: 4px;
+	color: #50575e;
+	font-size: 12px;
+}
+
+.indexlane-rila-monitor-summary dd,
+.indexlane-rila-fix-preview-summary dd {
+	margin: 0;
+	font-size: 15px;
+}
+
+.indexlane-rila-fix-form,
+.indexlane-rila-issue-form,
+.indexlane-rila-fix-undo {
+	margin: 0;
+}
+
+.indexlane-rila-fix-form input[type="url"] {
+	width: 100%;
+	max-width: 420px;
+	margin-bottom: 6px;
+}
+
+.indexlane-rila-impact-action form,
+.indexlane-rila-acknowledged-list form {
+	display: inline-block;
+	margin: 0 0 0 8px;
+}
+
+.indexlane-rila-fix-preview {
+	max-width: 1080px;
+	margin: 18px 0 28px;
+	padding: 16px 20px 20px;
+	border: 1px solid #c3c4c7;
+	border-left: 4px solid #2271b1;
+	background: #fff;
+}
+
+.indexlane-rila-fix-preview > h3 {
+	margin-top: 0;
+}
+
+.indexlane-rila-fix-preview-table code {
+	display: inline-block;
+	max-width: 340px;
+	overflow-wrap: anywhere;
+	white-space: normal;
+	vertical-align: middle;
+}
+
+.indexlane-rila-fix-skipped {
+	max-width: 980px;
+	margin: 8px 0 20px;
+	padding-left: 20px;
+	list-style: disc;
+}
+
+.indexlane-rila-fix-skipped li span {
+	display: block;
+	margin-left: 20px;
+	color: #50575e;
+}
+
+.indexlane-rila-acknowledged-issues {
+	max-width: 1080px;
+	margin: 18px 0 28px;
+}
+
+.indexlane-rila-acknowledged-list {
+	margin: 8px 0 0;
+	padding-left: 20px;
+	list-style: disc;
+}
+
+.indexlane-rila-acknowledged-list li {
+	margin-bottom: 6px;
+}
+
+.indexlane-rila-acknowledged-list li span {
+	margin-right: 8px;
+}
+
+@media screen and ( max-width: 782px ) {
+	.indexlane-rila-monitor-summary,
+	.indexlane-rila-fix-preview-summary {
+		grid-template-columns: 1fr;
+	}
+
+	.indexlane-rila-monitor-form {
+		padding: 8px 16px 16px;
+	}
+}

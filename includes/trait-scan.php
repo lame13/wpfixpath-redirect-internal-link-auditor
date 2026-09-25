@@ -886,7 +886,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			'source_content_id'  => isset( $source['content_id'] ) ? max( 0, (int) $source['content_id'] ) : 0,
 			'source_url'         => $source['url'],
 			'source_edit_url'    => $source['edit_url'],
-			'linked_url'         => $is_same_site && '' !== $linked_fragment && false === strpos( $linked_url, '#' ) ? $linked_url . '#' . $linked_fragment : $linked_url,
+			'linked_url'         => '' !== $linked_fragment && false === strpos( $linked_url, '#' ) ? $linked_url . '#' . $linked_fragment : $linked_url,
 			'http_status'        => $http_status,
 			'redirect_count'     => $redirect_count_value,
 			'final_url'          => $final_url,

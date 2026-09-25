@@ -431,6 +431,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			</p>
 
 			<?php self::render_baseline_notice(); ?>
+			<?php self::render_fix_notice(); ?>
+			<?php self::render_issue_notice(); ?>
+			<?php self::render_monitor_notice(); ?>
 
 			<?php if ( ! $has_session && is_array( $baseline ) ) : ?>
 				<?php self::render_baseline_panel( $baseline, $session ); ?>
@@ -440,6 +443,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 
 			<?php if ( $has_session && 'complete' === $session['status'] ) : ?>
 				<?php self::render_results( $session ); ?>
+				<?php self::render_fix_panel( $session ); ?>
 			<?php endif; ?>
 
 			<form id="indexlane-rila-scan-form" method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-form" <?php echo $has_session ? 'hidden' : ''; ?>>
@@ -593,6 +597,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 					<?php esc_html_e( 'This scan reads only the saved WordPress areas selected above. It does not run shortcodes, scan custom fields or page-builder data, or crawl pages as visitors see them.', 'indexlane-redirect-internal-link-auditor' ); ?>
 				</p>
 			</div>
+
+			<?php self::render_monitor_panel(); ?>
 
 		</div>
 		<?php
@@ -797,13 +803,22 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 		$comparison      = $is_verification ? self::get_session_comparison( $scan ) : null;
 		$sources_checked = (int) $stats['sources_processed'];
 		$links_checked   = (int) $stats['links_audited'];
-		$problem_urls    = self::issue_url_count( $results );
+		$issue_counts    = self::issue_url_counts( $results );
+		$problem_urls    = (int) $issue_counts['active'];
 		/* translators: %d: number of stored link sources checked */
 		$source_summary = sprintf( _n( '%d stored source checked.', '%d stored sources checked.', $sources_checked, 'indexlane-redirect-internal-link-auditor' ), $sources_checked );
 		/* translators: %d: number of links checked */
 		$link_summary = sprintf( _n( '%d link checked.', '%d links checked.', $links_checked, 'indexlane-redirect-internal-link-auditor' ), $links_checked );
 		/* translators: %d: number of URLs needing attention */
 		$url_summary = sprintf( _n( '%d URL needs attention.', '%d URLs need attention.', $problem_urls, 'indexlane-redirect-internal-link-auditor' ), $problem_urls );
+
+		if ( (int) $issue_counts['acknowledged'] > 0 ) {
+			$url_summary .= ' ' . sprintf(
+				/* translators: %d: number of acknowledged URLs excluded from the count */
+				_n( '%d acknowledged URL is listed separately.', '%d acknowledged URLs are listed separately.', (int) $issue_counts['acknowledged'], 'indexlane-redirect-internal-link-auditor' ),
+				(int) $issue_counts['acknowledged']
+			);
+		}
 		?>
 		<div id="indexlane-rila-results" class="indexlane-rila-results">
 			<h2><?php esc_html_e( 'Scan results', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
@@ -869,7 +884,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			<?php if ( empty( $results ) ) : ?>
 				<p><?php esc_html_e( 'No internal, old-site, staging, or development links were found in the selected stored sources.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
 			<?php else : ?>
-				<?php self::render_destination_impact( $impact_rows ); ?>
+				<?php self::render_destination_impact( $impact_rows, self::get_acknowledged_issues() ); ?>
 
 				<?php self::render_occurrence_details( $results ); ?>
 			<?php endif; ?>
@@ -1063,9 +1078,26 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 	/**
 	 * Render one row per actionable destination before the occurrence detail.
 	 *
-	 * @param array<int,array<string,mixed>> $impact_rows Destination impact rows.
+	 * @param array<int,array<string,mixed>>    $impact_rows         Destination impact rows.
+	 * @param array<string,array<string,mixed>> $acknowledged_issues Acknowledged issues.
 	 */
-	private static function render_destination_impact( array $impact_rows ): void {
+	private static function render_destination_impact( array $impact_rows, array $acknowledged_issues = array() ): void {
+		$active_rows       = array();
+		$acknowledged_rows = array();
+
+		foreach ( $impact_rows as $row ) {
+			$key = self::issue_key_for_destination(
+				isset( $row['destination_url'] ) ? (string) $row['destination_url'] : '',
+				self::result_code_from_label( isset( $row['result'] ) ? (string) $row['result'] : '' )
+			);
+
+			if ( '' !== $key && isset( $acknowledged_issues[ $key ] ) ) {
+				$acknowledged_rows[] = $row;
+				continue;
+			}
+
+			$active_rows[] = $row;
+		}
 		?>
 		<h2><?php esc_html_e( 'Problem URLs', 'indexlane-redirect-internal-link-auditor' ); ?></h2>
 		<p class="description">
@@ -1077,6 +1109,9 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 			<?php return; ?>
 		<?php endif; ?>
 
+		<?php if ( empty( $active_rows ) ) : ?>
+			<p><?php esc_html_e( 'Every problem URL in this scan has been acknowledged. They stay listed below with their evidence.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+		<?php else : ?>
 		<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Problem URLs', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
 		<table class="widefat striped indexlane-rila-impact-table">
 			<thead>
@@ -1085,10 +1120,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 					<th><?php esc_html_e( 'Outcome', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 					<th><?php esc_html_e( 'Where it appears', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 					<th><?php esc_html_e( 'Details', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+					<th><?php esc_html_e( 'Action', 'indexlane-redirect-internal-link-auditor' ); ?></th>
 				</tr>
 			</thead>
 			<tbody>
-				<?php foreach ( $impact_rows as $row ) : ?>
+				<?php foreach ( $active_rows as $row ) : ?>
 					<?php
 					/* translators: %d: number of times a URL or content item is linked */
 					$link_count_label = sprintf( _n( '%d time linked', '%d times linked', (int) $row['occurrences'], 'indexlane-redirect-internal-link-auditor' ), (int) $row['occurrences'] );
@@ -1115,11 +1151,44 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Admin {
 								</dl>
 							</details>
 						</td>
+						<td class="indexlane-rila-impact-action">
+							<?php if ( self::is_valid_http_url( (string) $row['destination_url'] ) ) : ?>
+								<a class="button-link" href="<?php echo esc_url( self::fix_panel_url( (string) $row['destination_url'] ) ); ?>"><?php esc_html_e( 'Fix', 'indexlane-redirect-internal-link-auditor' ); ?></a>
+							<?php endif; ?>
+							<?php self::render_issue_action_control( $row, false ); ?>
+						</td>
 					</tr>
 				<?php endforeach; ?>
 			</tbody>
 		</table>
 		</div>
+		<?php endif; ?>
+
+		<?php if ( ! empty( $acknowledged_rows ) ) : ?>
+			<details class="indexlane-rila-acknowledged-issues">
+				<summary>
+					<?php
+					echo esc_html(
+						sprintf(
+							/* translators: %d: number of acknowledged URLs */
+							_n( '%d acknowledged URL', '%d acknowledged URLs', count( $acknowledged_rows ), 'indexlane-redirect-internal-link-auditor' ),
+							count( $acknowledged_rows )
+						)
+					);
+					?>
+				</summary>
+				<p class="description"><?php esc_html_e( 'These URLs are known and are kept out of the attention count and the scheduled-check email. Their evidence and exports are unchanged.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+				<ul class="indexlane-rila-acknowledged-list">
+					<?php foreach ( $acknowledged_rows as $row ) : ?>
+						<li>
+							<span><?php echo esc_html( (string) $row['destination_url'] ); ?></span>
+							<span class="indexlane-rila-cell-note"><?php echo esc_html( (string) $row['impact'] . ' · ' . (string) $row['result'] ); ?></span>
+							<?php self::render_issue_action_control( $row, true ); ?>
+						</li>
+					<?php endforeach; ?>
+				</ul>
+			</details>
+		<?php endif; ?>
 		<?php
 	}
 

@@ -17,9 +17,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 	 * requests and therefore always represents the same scan as the detail view.
 	 *
 	 * @param array<int,array<string,mixed>> $results Result rows.
+	 * @param bool $include_all_issues Include blocked and migration-only findings.
 	 * @return array<int,array<string,mixed>>
 	 */
-	private static function build_destination_impact( array $results ): array {
+	private static function build_destination_impact( array $results, bool $include_all_issues = false ): array {
 		$groups = array();
 
 		foreach ( $results as $row ) {
@@ -34,7 +35,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Reports {
 			$intent_severity = isset( $row['intent_severity'] ) ? trim( (string) $row['intent_severity'] ) : '';
 			$is_intent       = in_array( $intent_severity, array( 'warning', 'needs_review' ), true );
 
-			if ( ! $is_broken && ! $is_redirected && ! $is_intent ) {
+			if ( ! $is_broken && ! $is_redirected && ! $is_intent && ( ! $include_all_issues || 'ok' === self::row_result_code( $row ) ) ) {
 				continue;
 			}
 

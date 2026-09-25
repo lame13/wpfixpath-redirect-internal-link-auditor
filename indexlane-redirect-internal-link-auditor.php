@@ -1,9 +1,9 @@
 <?php
 /**
- * Plugin Name: IndexLane Redirect & Internal Link Auditor
+ * Plugin Name: IndexLane Broken Link & Redirect Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
- * Description: Find broken links and leftover migration URLs, open their editing locations, and check whether your fixes worked.
- * Version: 0.7.0
+ * Description: Find broken internal links and migration leftovers, preview and undo link repairs, and schedule checks for new problems. Free, with no account required.
+ * Version: 1.0.0
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -25,6 +25,11 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 	require_once __DIR__ . '/includes/trait-scan.php';
 	require_once __DIR__ . '/includes/trait-reports.php';
 	require_once __DIR__ . '/includes/trait-baselines.php';
+	require_once __DIR__ . '/includes/trait-fixes.php';
+	require_once __DIR__ . '/includes/trait-issues.php';
+	require_once __DIR__ . '/includes/trait-monitor.php';
+	require_once __DIR__ . '/includes/trait-cli.php';
+	require_once __DIR__ . '/includes/class-cli.php';
 
 	/**
 	 * Admin-only internal link and redirect diagnostic helper.
@@ -35,9 +40,13 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		use IndexLane_Redirect_Internal_Link_Auditor_Scan;
 		use IndexLane_Redirect_Internal_Link_Auditor_Reports;
 		use IndexLane_Redirect_Internal_Link_Auditor_Baselines;
+		use IndexLane_Redirect_Internal_Link_Auditor_Fixes;
+		use IndexLane_Redirect_Internal_Link_Auditor_Issues;
+		use IndexLane_Redirect_Internal_Link_Auditor_Monitor;
+		use IndexLane_Redirect_Internal_Link_Auditor_CLI;
 
 		private const PLUGIN_FILE                     = __FILE__;
-		private const VERSION                         = '0.7.0';
+		private const VERSION                         = '1.0.0';
 		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY                      = 'manage_options';
 		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';
@@ -49,6 +58,21 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		private const MAX_BASELINE_FILE_SIZE          = 20971520;
 		private const MAX_BASELINE_CONTENT_ITEMS      = 100000;
 		private const MAX_BASELINE_RESULTS            = 100000;
+		private const FIX_JOURNAL_OPTION              = 'indexlane_rila_fix_journal';
+		private const FIX_JOURNAL_MAX_BATCHES         = 25;
+		private const FIX_JOURNAL_MAX_BYTES           = 8388608;
+		private const FIX_MAX_ITEMS_PER_BATCH         = 500;
+		private const FIX_MAX_CANDIDATES_IN_PANEL     = 100;
+		private const IGNORED_ISSUES_USER_OPTION      = 'indexlane_rila_ignored_issues';
+		private const MAX_IGNORED_ISSUES              = 2000;
+		private const MONITOR_OPTION                  = 'indexlane_rila_monitor';
+		private const MONITOR_SESSION_OPTION          = 'indexlane_rila_monitor_session';
+		private const MONITOR_CRON_HOOK               = 'indexlane_rila_monitor_run';
+		private const MONITOR_CONTINUE_HOOK           = 'indexlane_rila_monitor_continue';
+		private const MONITOR_RUN_BUDGET_SECONDS      = 20;
+		private const MONITOR_MAX_BATCHES_PER_RUN     = 12;
+		private const MONITOR_DEFAULT_REQUEST_LIMIT   = 2000;
+		private const MONITOR_MAX_TRACKED_ISSUES      = 5000;
 		private const SESSION_TRANSIENT_PREFIX        = 'indexlane_rila_session_';
 		private const SESSION_LIFETIME                = 86400;
 		private const INITIAL_REQUEST_ALLOWANCE       = 250;
@@ -85,9 +109,21 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 			add_action( 'admin_enqueue_scripts', array( __CLASS__, 'enqueue_admin_assets' ) );
 			add_action( 'admin_init', array( __CLASS__, 'maybe_export_csv' ) );
 			add_action( 'admin_init', array( __CLASS__, 'maybe_handle_baseline_action' ) );
+			add_action( 'admin_init', array( __CLASS__, 'maybe_handle_fix_action' ) );
+			add_action( 'admin_init', array( __CLASS__, 'maybe_handle_issue_action' ) );
+			add_action( 'admin_init', array( __CLASS__, 'maybe_handle_monitor_action' ) );
 			add_action( 'wp_ajax_indexlane_rila_start_scan', array( __CLASS__, 'ajax_start_scan' ) );
 			add_action( 'wp_ajax_indexlane_rila_run_batch', array( __CLASS__, 'ajax_run_batch' ) );
 			add_action( 'wp_ajax_indexlane_rila_control_scan', array( __CLASS__, 'ajax_control_scan' ) );
+			add_action( 'init', array( __CLASS__, 'sync_monitor_schedule' ) );
+			add_action( self::MONITOR_CRON_HOOK, array( __CLASS__, 'run_scheduled_monitor' ) );
+			add_action( self::MONITOR_CONTINUE_HOOK, array( __CLASS__, 'run_scheduled_monitor' ) );
+			add_action( 'wp_dashboard_setup', array( __CLASS__, 'register_dashboard_widget' ) );
+			add_filter( 'site_status_tests', array( __CLASS__, 'register_site_health_test' ) );
+
+			if ( defined( 'WP_CLI' ) && WP_CLI && class_exists( 'IndexLane_RILA_CLI' ) ) {
+				WP_CLI::add_command( 'indexlane', 'IndexLane_RILA_CLI' );
+			}
 		}
 	}
 

@@ -1,72 +1,92 @@
-=== IndexLane Redirect & Internal Link Auditor ===
+=== IndexLane Broken Link & Redirect Auditor ===
 Contributors: wpfixpath
 Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 0.7.0
+Stable tag: 1.0.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Find broken links and leftover migration URLs, open their editing locations, and check whether your fixes worked.
+Find broken internal links, fix stored URLs with preview and undo, and schedule checks that email you when problems change.
 
 == Description ==
 
-Changed page URLs, moved a WordPress site, or taken over its maintenance? IndexLane finds broken links and leftover migration URLs in selected stored WordPress sources. It shows the page, menu, or template where each link is maintained, then checks whether your edits resolved the issue.
+A moved page. An old staging URL in the footer. A link that loads, but lands in the wrong place. Small problems like these are easy to leave behind when a site changes.
 
-Run it on demand from WordPress admin. No account or external scanning service is required. The plugin never edits your content or creates redirects.
+**IndexLane helps you find them, see where to edit them, and check the result.** Scan the WordPress content you choose, review the links that need attention, and replace a URL from the results page or open its WordPress editor. Turn on scheduled checks when you want help keeping up with new problems.
 
-= Check links after a migration =
+It's free, runs inside WordPress, and needs no account or external scanning service.
 
-Supply your old domains to find links that still point there. Common staging and development domains are also flagged. These off-site URLs are listed for review without contacting those sites.
+= Find more than a 404 =
 
-= Clean up links after changing URLs =
+Check internal links for broken pages, redirects, and redirect chains. Add your old domains to find migration leftovers; common staging and development domains are flagged too, without contacting those sites.
 
-Find internal links that still take a redirect, follow a redirect chain, or end at a 404/410 response. Review the final URL and open the original source to update the link.
+A page can return a successful response and still deserve a look. IndexLane also flags a different canonical URL, noindex directives, meta-refresh redirects, and missing linked sections such as `#pricing`. These appear beside the HTTP result under **Page intent**, so you can judge what needs changing.
 
-= Find links that return 200 but still need attention =
+= Go straight to the source =
 
-A successful HTTP response does not always mean a link reaches the intended page. IndexLane reports a different or off-site canonical, noindex directives, meta-refresh redirects, and missing linked fragments in **Page intent**. Problem URLs includes responding destinations that need review or have a warning.
+A broken footer link might live in one menu, even if visitors see it on every page. IndexLane shows the source where the link is maintained, with its link text and an editing link.
 
-PDFs, images, and internal nofollow links are informational. Existing redirect, blocked, and broken outcomes keep their transport classification, with intent evidence beside them.
+Choose from published posts, pages and public custom post types; classic menus; Navigation blocks; synced patterns; block templates and template parts; and assigned block widgets. You decide which areas to check.
 
-= Find the place to edit =
+= Fix a URL without hunting through every page =
 
-A broken footer link may be maintained once in a menu or template part. IndexLane keeps that editing location with the result, alongside the link text and whether its source is individual content or a shared site-wide area.
+Under **Fix links**, enter a replacement URL and select **Preview changes**. Review the affected sources and expand the full before-and-after values, then apply the repair. A redirect's final URL may be offered as a suggestion; you choose whether to use it.
 
-Choose which stored sources to inspect: published posts, pages and public custom post types; classic menus; Navigation entities; synced patterns; block templates and template parts; and assigned block widgets.
+Repairs change matching stored link attributes and supported block link settings. Recent repairs keep an undo history. Undo skips sources edited since the repair, so it won't discard your later work.
 
-= Save a scan and check your fixes =
+Theme-file templates, menu items whose URLs follow a WordPress page or other object, and unsupported storage need their own editors. IndexLane does not create redirects.
 
-1. Open **Tools -> Redirect & Internal Link Auditor**, choose the areas to check, and select **Start scan**.
-2. Review **Problem URLs** and the sources under **Where it appears**. Use **Link details** for the full list, including old-domain and staging links.
-3. Select **Save these results for comparison** before editing the links.
-4. Fix the links in their WordPress editors, return to the auditor, and select **Check fixes against saved scan**.
-5. Review new, changed, resolved, and still-present issues. Select **Download comparison** to keep the evidence or share it with a client.
+= Check that your changes helped =
 
-Keep the scan page open while it runs. You can pause, return later, and continue. If the request limit is reached, increase the allowance to finish the selected scope.
+Save a completed scan before making changes, then select **Check fixes against saved scan**. The comparison shows new, changed, resolved, and still-present issues in the same selected scope. Download it as a CSV for your records or a client handover.
 
-See the [illustrated walkthrough](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.7.0/docs/quick-start.md) for a demo site with a broken footer link and an outdated service URL.
+Content coverage also shows which scanned pages have few incoming links from the sources you selected. It's a useful starting point for review, not proof that a page has no links anywhere on the site.
 
-= Preview the reports =
+= Keep an eye on new problems =
 
-These sample CSVs contain fictional site data and show the current export columns:
+Choose an hourly, twice-daily, daily, or weekly check. After the first complete check sends a summary, later emails report newly detected or resolved problems. Acknowledge a known issue to remove it from the attention count and change notifications while keeping its evidence in reports.
 
-* [Problem URLs](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.7.0/docs/sample-destination-impact.csv): grouped broken, redirected, and intent-review destinations with their editing locations.
-* [Link details](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.7.0/docs/sample-report.csv): individual links, source locations, HTTP results, and page intent.
-* [Content coverage](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.7.0/docs/sample-target-coverage.csv): incoming links from content and shared areas, outgoing links, and link text.
+Schedules use WP-Cron and depend on site visits or your server's cron setup. If a check reaches its request limit, the result is marked partial and is not used to claim that earlier problems are fixed. Status is available on the WordPress dashboard and in Site Health.
 
-Content coverage includes a filter for pages with zero or one detected linking source. “No incoming links detected in selected sources” describes only the stored sources selected for that scan; it does not prove that a page is an orphan.
+= Start with one scan =
 
-All reports reuse the completed scan without making more HTTP requests. Saved scans can also be downloaded and uploaded as site-specific JSON for longer-term storage.
+1. Open **Tools -> Redirect & Internal Link Auditor** and choose the areas to check.
+2. Select **Start scan** and keep the page open. You can pause and return later, or increase the request allowance if needed.
+3. Review **Problem URLs** and **Link details**. Save the results for comparison before making changes.
+4. Preview a replacement under **Fix links**, or use an editing link to make the change yourself.
+5. Run **Check fixes against saved scan** and review the comparison.
 
-Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor). Developers can register additional stored-source adapters through the documented `indexlane_rila_source_providers` filter in the [project README](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/0.7.0/README.md).
+The [illustrated walkthrough](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/quick-start.md) shows a broken footer link and an outdated service URL on a small demo site.
+
+= See what the reports include =
+
+These sample CSVs use fictional site data:
+
+* [Problem URLs](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/sample-destination-impact.csv): destinations that need attention and the sources linking to them.
+* [Link details](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/sample-report.csv): individual links, editing locations, HTTP results, and page intent.
+* [Content coverage](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/sample-target-coverage.csv): incoming and outgoing links within the selected sources.
+
+Downloads reuse completed scan results without making another scan. You can also download or upload a saved scan as site-specific JSON.
+
+Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor). Developers can add stored-source adapters through the filter documented in the [project README](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/README.md).
+
+== WP-CLI ==
+
+Agencies and deployment scripts can run the same checks without a browser:
+
+* `wp indexlane scan --content-scope=all --format=table` checks the site and lists the URLs that need attention.
+* `wp indexlane fix --from=OLD --to=NEW --dry-run` previews an exact replacement; the same command without `--dry-run` applies it.
+* `wp indexlane undo` restores the most recent repair, and `wp indexlane repairs` lists the recorded history.
 
 == Data handling ==
 
-Scans run on demand from WordPress admin through authenticated AJAX batches. Each batch processes at most five stored sources and makes at most five outbound HTTP requests. The active or completed session is stored in a per-user WordPress transient for up to 24 hours after its last activity. Abandoned sessions expire automatically, and completed-session downloads reuse the exact displayed results without scanning again.
+Scans run on demand from WordPress admin through authenticated AJAX batches, or from the scheduled check and WP-CLI without a browser. Each batch processes at most five stored sources and makes at most five outbound HTTP requests. The active or completed browser scan is stored in a per-user WordPress transient for up to 24 hours after its last activity. Abandoned sessions expire automatically, and completed-session downloads reuse the exact displayed results without scanning again.
 
 An administrator may explicitly save one site-specific scan in their WordPress user options. It remains until it is replaced or deleted. Portable saved-scan JSON is limited to 20 MB and validated against the exact supported format and current site URL before upload.
+
+A repair writes only the stored link values you confirmed, through the normal WordPress post, menu-item, and block-widget APIs, and records the previous values in a bounded site option so the repair can be undone. The history keeps up to 25 repairs within an 8 MB total budget, including before-and-after values and their metadata. Older entries are removed as the history fills up. Acknowledged URLs are stored once per site, and the scheduled check stores its configuration, its comparison set, and the last result summary.
 
 The plugin does not create an account, call an IndexLane service, or add frontend tracking.
 
@@ -79,6 +99,8 @@ A scan can snapshot at most 100,000 stored sources. Block widgets are included o
 Final same-site responses are inspected up to 256 KB. Bodies are never retained and intent checks add no requests. Partial responses and bounded fragment inventories cannot prove an unseen fragment is missing. Checks inspect stored HTML targets, not JavaScript-generated content; fragment-only links within their source page are outside the scan. No canonical target or meta-refresh target is fetched.
 
 Each AJAX batch makes at most five outbound HTTP requests. A session begins with an explicit limit of 250 actual requests, including redirect hops. When that limit is reached, the administrator can increase it by 250 and continue without losing progress or recording incomplete results.
+
+A repair handles one linked URL at a time, including its fragment. It is limited to 500 stored sources and must fit within the 8 MB undo budget. Changes made after the preview require a fresh preview. Undo is available while the repair remains in history and the stored values still match. Keep your normal site backups.
 
 == Installation ==
 
@@ -94,11 +116,15 @@ Each AJAX batch makes at most five outbound HTTP requests. A session begins with
 
 = Does this plugin change links or content? =
 
-No. The plugin is read-only and diagnostic only.
+Scanning and scheduled checks do not change your content. Applying a repair changes the matching stored links after you confirm the preview. Recent repairs can be undone while their history is retained, provided the source has not been edited again.
 
 = Does this plugin store scan results? =
 
-One active or completed session per administrator is stored temporarily in a WordPress transient for up to 24 hours after its last activity. One opt-in saved scan per administrator is stored in WordPress user options until explicitly replaced or deleted. The plugin does not create custom database tables or retain scan history.
+One active or completed session per administrator is stored temporarily in a WordPress transient for up to 24 hours after its last activity. One opt-in saved scan per administrator is stored in WordPress user options until explicitly replaced or deleted. Repairs and acknowledged issues are stored in bounded site options. Scheduled checks also store their settings, temporary progress, issue identities, and latest summary. The plugin does not create custom database tables or keep a history of every scan.
+
+= Does this plugin create redirects? =
+
+No. It reports links that take a redirect and can replace the stored link with its final URL, but it never creates or edits a redirect rule.
 
 = Does it use an external API? =
 
@@ -116,6 +142,15 @@ No. Old-site, staging, and development-site links are flagged but not fetched. A
 4. Read the Page intent column beside HTTP results and original linked fragments in Link details.
 
 == Changelog ==
+
+= 1.0.0 =
+
+* Fix a stored URL from the results page, with a before-and-after preview and undo for recent repairs.
+* Acknowledge known issues and schedule checks with an initial summary and emails when problems change.
+* Check status from the dashboard or Site Health, or scan, repair, and undo through WP-CLI.
+* Keep repairs confined to supported link storage, preserve escaped content, and require a new preview if the source changes.
+* Correct replacement counts, undo handling, partial-scan reporting, and JSON/CSV command output.
+* Updated the description and release notes to explain the workflow and its limits more clearly.
 
 = 0.7.0 =
 
@@ -217,3 +252,9 @@ No. Old-site, staging, and development-site links are flagged but not fetched. A
 = 0.1.0 =
 
 * Initial diagnostic release.
+
+== Upgrade Notice ==
+
+= 1.0.0 =
+
+You can now repair stored links after previewing the changes, undo recent repairs, acknowledge known issues, and turn on scheduled checks. Scanning still leaves your content unchanged. Scheduled checks are off until you enable them.
