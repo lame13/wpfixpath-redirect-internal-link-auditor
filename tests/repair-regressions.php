@@ -223,4 +223,37 @@ indexlane_assert_same( 2, $batch_undo['restored'], 'One undo must restore every 
 indexlane_assert_same( '<a href="/old-a/">A</a><a href="/old-b/">B</a>', $GLOBALS['indexlane_test_posts'][921]->post_content, 'Undo must restore a source with multiple suggestions.' );
 indexlane_assert_same( '<p><a href="/old-a/">A</a></p>', $GLOBALS['indexlane_test_posts'][922]->post_content, 'Undo must restore every source in the batch.' );
 
-unset( $GLOBALS['indexlane_test_posts'][921], $GLOBALS['indexlane_test_posts'][922] );
+// A grouped repair must handle raw menu URLs as well as HTML sources.
+$GLOBALS['indexlane_test_menu_items'][93] = array( (object) array( 'ID' => 923, 'type' => 'custom', 'title' => 'Old A' ) );
+$GLOBALS['indexlane_test_post_meta'][923]['_menu_item_url'] = '/old-a/';
+$batch_menu_row = array_merge( $batch_row_a, array( 'source_id' => 93, 'source_key' => 'menu:93', 'source_content_id' => 0, 'source_type_code' => 'menu' ) );
+$menu_batch = indexlane_invoke( 'build_fix_all_plan', array( array( 'results' => array( $batch_menu_row ) ) ) );
+indexlane_assert_same( false, is_wp_error( $menu_batch ), 'A menu-only suggestion must produce an editable batch.' );
+indexlane_assert_same( '/new-a/', $menu_batch['items'][0]['after'], 'Batch menu repair must preserve site-relative storage.' );
+$menu_applied = indexlane_invoke( 'apply_fix_all_plan', array( $menu_batch ) );
+indexlane_assert_same( '/new-a/', get_post_meta( 923, '_menu_item_url', true ), 'A batch must apply custom menu URL changes.' );
+indexlane_invoke( 'undo_fix_batch', array( $menu_applied['batch_id'] ) );
+indexlane_assert_same( '/old-a/', get_post_meta( 923, '_menu_item_url', true ), 'Batch undo must restore custom menu URLs.' );
+
+// Each pair is matched against the original value, including block attributes.
+$cascade_before = '<a href="/old-a/">A</a><a href="/old-b/">B</a><!-- wp:navigation-link {"url":"/old-a/"} /-->';
+$GLOBALS['indexlane_test_posts'][921]->post_content = $cascade_before;
+$cascade_a = array_merge( $batch_row_a, array( 'final_url' => $batch_row_b['linked_url'] ) );
+$cascade_scan = array( 'results' => array( $cascade_a, $batch_row_b ) );
+$cascade = indexlane_invoke( 'build_fix_all_plan', array( $cascade_scan ) );
+indexlane_assert_same( '<a href="/old-b/">A</a><a href="/new-b/">B</a><!-- wp:navigation-link {"url":"/old-b/"} /-->', $cascade['items'][0]['after'], 'A later suggestion must never rewrite an earlier replacement.' );
+indexlane_assert_same( 3, $cascade['occurrences'], 'Each original stored attribute must count only once in a batch.' );
+$swap_scan = array( 'results' => array( $cascade_a, array_merge( $batch_row_b, array( 'final_url' => $batch_row_a['linked_url'] ) ) ) );
+$swap = indexlane_invoke( 'build_fix_all_plan', array( $swap_scan ) );
+indexlane_assert_same( '<a href="/old-b/">A</a><a href="/old-a/">B</a><!-- wp:navigation-link {"url":"/old-b/"} /-->', $swap['items'][0]['after'], 'Suggestions that swap two URLs must preserve both reviewed replacements.' );
+$GLOBALS['indexlane_test_posts'][921]->post_content = '<a href="/old-a/">A</a><a href="/old-b/">B</a>';
+
+// Skipped suggestions are absent from the posted checkboxes, but do not change the writes.
+$uneditable_row = array_merge( $batch_row_a, array( 'linked_url' => 'https://example.test/uneditable/', 'source_type_code' => 'custom_provider' ) );
+$mixed_scan = array( 'results' => array( $batch_row_a, $uneditable_row ) );
+$mixed_preview = indexlane_invoke( 'build_fix_all_plan', array( $mixed_scan ) );
+$mixed_apply = indexlane_invoke( 'build_fix_all_plan', array( $mixed_scan, array_column( $mixed_preview['pairs'], 'from_url' ) ) );
+indexlane_assert_same( 1, count( $mixed_preview['skipped'] ), 'The review must still explain uneditable suggestions.' );
+indexlane_assert_same( indexlane_invoke( 'fix_confirmation_action', array( $mixed_preview ) ), indexlane_invoke( 'fix_confirmation_action', array( $mixed_apply ) ), 'Skipped suggestions must not invalidate confirmation of identical reviewed writes.' );
+
+unset( $GLOBALS['indexlane_test_posts'][921], $GLOBALS['indexlane_test_posts'][922], $GLOBALS['indexlane_test_menu_items'][93], $GLOBALS['indexlane_test_post_meta'][923] );

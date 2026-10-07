@@ -5,6 +5,7 @@ set -euo pipefail
 base_url="${1:-http://127.0.0.1:8080}"
 admin_user="${2:-admin}"
 admin_password="${3:-password}"
+plugin_file="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/indexlane-redirect-internal-link-auditor.php"
 temporary_root="$(mktemp -d "${TMPDIR:-/tmp}/indexlane-rila-ajax.XXXXXX")"
 cookie_jar="${temporary_root}/cookies.txt"
 page_html="${temporary_root}/auditor.html"
@@ -269,7 +270,12 @@ grep -Fqi -- 'content-type: application/json' "${baseline_headers}"
 grep -Fqi -- 'content-disposition: attachment; filename=indexlane-redirect-internal-link-auditor-saved-scan-' "${baseline_headers}"
 php -r '
 	$data = json_decode(file_get_contents($argv[1]), true);
-	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 3 || $data["plugin_version"] !== "1.0.0") {
+	$plugin_source = file_get_contents($argv[3]);
+	if (!preg_match("/^[ \\t]*\\*[ \\t]*Version:[ \\t]*([^\\s]+)/m", $plugin_source, $version)) {
+		fwrite(STDERR, "The plugin header version could not be read.\n");
+		exit(1);
+	}
+	if (!is_array($data) || $data["format"] !== "indexlane-rila-baseline" || $data["schema_version"] !== 3 || $data["plugin_version"] !== $version[1]) {
 		fwrite(STDERR, "Exported baseline metadata is invalid.\n");
 		exit(1);
 	}
@@ -281,7 +287,7 @@ php -r '
 		fwrite(STDERR, "Exported baseline completion evidence is invalid.\n");
 		exit(1);
 	}
-' "${baseline_json}" "${base_url}"
+' "${baseline_json}" "${base_url}" "${plugin_file}"
 
 verification_start="${temporary_root}/verification-start.json"
 curl -fsS -b "${cookie_jar}" \

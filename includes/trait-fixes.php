@@ -452,38 +452,35 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 			return new WP_Error( 'fix_all_nothing_editable', __( 'None of the suggested links could be prepared for repair. Review the skipped suggestions in these results.', 'indexlane-redirect-internal-link-auditor' ) );
 		}
 
-		$merged = array();
-		$order  = array();
+		$merged       = array();
+		$order        = array();
+		$source_pairs = array();
 
 		foreach ( $groups as $group ) {
 			foreach ( $group['items'] as $item ) {
 				$key = (string) $item['storage'] . ':' . (int) $item['target_id'] . ':' . (string) $item['target_sub'];
-				if ( ! isset( $merged[ $key ] ) ) {
-					$merged[ $key ]                = $item;
-					$merged[ $key ]['after']       = (string) $item['before'];
-					$merged[ $key ]['occurrences'] = 0;
-					$order[ $key ]                 = true;
-				}
-
-				$folded = self::replace_stored_link_url( (string) $merged[ $key ]['after'], (string) $group['from_url'], (string) $group['to_url'], (string) $merged[ $key ]['base_url'] );
-				if ( $folded['replacements'] < 1 ) {
-					$skipped[] = array(
-						'from_url'     => (string) $group['from_url'],
-						'to_url'       => (string) $group['to_url'],
-						'source_title' => (string) $item['source_title'],
-						'edit_url'     => (string) $item['edit_url'],
-						'reason'       => __( 'This source did not store the suggested link when the batch was prepared.', 'indexlane-redirect-internal-link-auditor' ),
-					);
+				if ( 'menu_item_url' === $item['storage'] ) {
+					$merged[ $key ] = $item;
+					$order[ $key ]  = true;
 					continue;
 				}
+				if ( ! isset( $merged[ $key ] ) ) {
+					$merged[ $key ]       = $item;
+					$order[ $key ]        = true;
+					$source_pairs[ $key ] = array();
+				}
 
-				$merged[ $key ]['after']        = $folded['content'];
-				$merged[ $key ]['occurrences'] += (int) $folded['replacements'];
+				$source_pairs[ $key ][] = array( 'from_url' => $group['from_url'], 'to_url' => $group['to_url'] );
 			}
 		}
 
 		$items = array();
 		foreach ( array_keys( $order ) as $key ) {
+			if ( isset( $source_pairs[ $key ] ) ) {
+				$folded = self::replace_stored_link_urls( (string) $merged[ $key ]['before'], $source_pairs[ $key ], (string) $merged[ $key ]['base_url'] );
+				$merged[ $key ]['after']       = $folded['content'];
+				$merged[ $key ]['occurrences'] = (int) $folded['replacements'];
+			}
 			if ( (string) $merged[ $key ]['after'] === (string) $merged[ $key ]['before'] ) {
 				continue;
 			}
@@ -750,7 +747,20 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 	 * @return array{content:string,replacements:int}
 	 */
 	private static function replace_stored_link_url( string $content, string $from_url, string $to_url, string $base_url ): array {
-		if ( '' === $content || '' === $from_url || '' === $to_url ) {
+		$pairs = '' !== $from_url && '' !== $to_url ? array( array( 'from_url' => $from_url, 'to_url' => $to_url ) ) : array();
+		return self::replace_stored_link_urls( $content, $pairs, $base_url );
+	}
+
+	/**
+	 * Match each original attribute once so batch replacements cannot cascade.
+	 *
+	 * @param string $content Stored source content.
+	 * @param array<int,array{from_url:string,to_url:string}> $pairs Reviewed URL pairs.
+	 * @param string $base_url Base URL for relative stored values.
+	 * @return array{content:string,replacements:int}
+	 */
+	private static function replace_stored_link_urls( string $content, array $pairs, string $base_url ): array {
+		if ( '' === $content || empty( $pairs ) ) {
 			return array(
 				'content'      => $content,
 				'replacements' => 0,
@@ -762,10 +772,17 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 		$pattern = '~<!--[\s\S]*?(?:-->|$)|<(script|style|textarea|title|template|xmp|iframe|noembed|noframes|plaintext)\b(?:"[^"]*"|\'[^\']*\'|[^\'">])*?>[\s\S]*?(?:</\1\s*>|$)|<([a-z][a-z0-9:-]*)(?=[\s/>])(?:"[^"]*"|\'[^\']*\'|[^\'">])*>~i';
 		$replaced = preg_replace_callback(
 			$pattern,
-			static function ( array $token ) use ( $from_url, $to_url, $base_url, &$replacements ): string {
+			static function ( array $token ) use ( $pairs, $base_url, &$replacements ): string {
 				$markup = $token[0];
 				if ( 0 === strpos( $markup, '<!--' ) ) {
-					return self::replace_block_link_url( $markup, $from_url, $to_url, $base_url, $replacements );
+					foreach ( $pairs as $pair ) {
+						$count = $replacements;
+						$result = self::replace_block_link_url( $markup, $pair['from_url'], $pair['to_url'], $base_url, $replacements );
+						if ( $replacements > $count ) {
+							return $result;
+						}
+					}
+					return $markup;
 				}
 				if ( empty( $token[2] ) || ! in_array( strtolower( $token[2] ), array( 'a', 'area', 'img', 'source', 'audio', 'video', 'track', 'embed', 'input' ), true ) ) {
 					return $markup;
@@ -777,7 +794,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 				$attribute = '~(\s+)([^\s/=>]+)(\s*=\s*)(?:"([^"]*)"|\'([^\']*)\'|([^\s"\'<>`=]+))~';
 				$result = preg_replace_callback(
 					$attribute,
-					static function ( array $match ) use ( $token, $from_url, $to_url, $base_url, &$replacements, &$seen ): string {
+					static function ( array $match ) use ( $token, $pairs, $base_url, &$replacements, &$seen ): string {
 						$name = strtolower( $match[2] );
 						$wanted = in_array( strtolower( $token[2] ), array( 'a', 'area' ), true ) ? 'href' : 'src';
 						if ( $name !== $wanted || isset( $seen[ $name ] ) ) {
@@ -789,13 +806,16 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 						$quote = '"' === $raw[0] || "'" === $raw[0] ? $raw[0] : '';
 						$value = '' === $quote ? $raw : substr( $raw, 1, -1 );
 						$stored = html_entity_decode( $value, ENT_QUOTES | ENT_HTML5, 'UTF-8' );
-						if ( ! self::stored_url_matches( $stored, $from_url, $base_url ) ) {
-							return $match[0];
+						foreach ( $pairs as $pair ) {
+							if ( ! self::stored_url_matches( $stored, $pair['from_url'], $base_url ) ) {
+								continue;
+							}
+							$replacement = self::encode_url_for_attribute( self::stored_url_replacement_value( $stored, $pair['to_url'], $base_url ) );
+							$quote = '' === $quote ? '"' : $quote;
+							$replacements++;
+							return $prefix . $quote . $replacement . $quote;
 						}
-						$replacement = self::encode_url_for_attribute( self::stored_url_replacement_value( $stored, $to_url, $base_url ) );
-						$quote = '' === $quote ? '"' : $quote;
-						$replacements++;
-						return $prefix . $quote . $replacement . $quote;
+						return $match[0];
 					},
 					$markup
 				);
@@ -1517,6 +1537,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 	 * @param array<string,mixed> $plan Previewed plan.
 	 */
 	private static function fix_confirmation_action( array $plan ): string {
+		if ( ! empty( $plan['batch'] ) ) {
+			// Uneditable suggestions have no selection checkbox or content write.
+			unset( $plan['skipped'] );
+		}
 		return 'indexlane_rila_fix_' . hash( 'sha256', (string) wp_json_encode( $plan ) );
 	}
 
@@ -1670,10 +1694,13 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 
 			<?php if ( ! empty( $suggested ) && ! ( is_array( self::$pending_fix_plan ) && ! empty( self::$pending_fix_plan['batch'] ) ) ) : ?>
 				<?php
-				$suggested_sources = 0;
+				$suggested_source_keys = array();
 				foreach ( $suggested as $suggested_candidate ) {
-					$suggested_sources += (int) $suggested_candidate['affected_sources'];
+					foreach ( $suggested_candidate['sources'] as $source ) {
+						$suggested_source_keys[ $source['key'] ] = true;
+					}
 				}
+				$suggested_sources = count( $suggested_source_keys );
 				?>
 				<div class="indexlane-rila-fix-suggested">
 					<h3><?php esc_html_e( 'Apply suggested fixes', 'indexlane-redirect-internal-link-auditor' ); ?></h3>
@@ -1697,8 +1724,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 							<?php
 							echo esc_html(
 								sprintf(
-									/* translators: %d: number of stored sources a suggested batch would change */
-									_n( 'Would change %d stored source.', 'Would change %d stored sources.', (int) $suggested_sources, 'indexlane-redirect-internal-link-auditor' ),
+									/* translators: %d: number of distinct stored sources containing suggested links */
+									_n( 'Found in %d stored source.', 'Found in %d stored sources.', (int) $suggested_sources, 'indexlane-redirect-internal-link-auditor' ),
 									(int) $suggested_sources
 								)
 							);

@@ -1,5 +1,15 @@
 # Changelog
 
+## 1.1.1 - 2026-10-07
+
+- Fixed suggested-fix batches skipping classic menu custom links. Batch repairs and Undo now include those stored URLs.
+- Fixed overlapping suggestions rewriting an earlier replacement a second time. Each original link is matched once, preserving the reviewed URL pairs and accurate replacement counts.
+- Fixed uneditable suggestions invalidating confirmation of the editable changes in the same batch. Changes to selected URLs or stored values still require a new preview.
+- Corrected the suggested-fix summary to count distinct sources and describe where suggestions were found.
+- Kept query-string comparisons case-sensitive when checking for a trailing-slash difference.
+- Registered the documented `wp indexlane fix-suggested` command and kept its JSON/CSV output free of human-readable status messages.
+- Updated integration and AJAX tests to validate saved-scan versions against the plugin header instead of a stale 1.0.0 value.
+
 ## 1.1.0 - 2026-10-07
 
 You can now apply grouped fixes, and the scan catches two more links that respond but still point somewhere wrong.

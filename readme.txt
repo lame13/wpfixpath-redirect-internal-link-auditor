@@ -4,7 +4,7 @@ Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.1.0
+Stable tag: 1.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -146,6 +146,15 @@ No. Old-site, staging, and development-site links are flagged but not fetched. A
 
 == Changelog ==
 
+= 1.1.1 =
+
+* Fixed suggested-fix batches skipping classic menu custom links.
+* Prevented overlapping suggestions from replacing the same stored link twice or inflating replacement counts.
+* Fixed uneditable suggestions blocking confirmation of valid changes in the same batch.
+* Corrected the suggested-fix summary to count distinct sources.
+* Kept query-string values case-sensitive when checking for trailing-slash differences.
+* Fixed the documented `wp indexlane fix-suggested` command name and its JSON/CSV output.
+
 = 1.1.0 =
 
 * Fix the suggested links in one reviewed batch, leaving out any suggestion you do not want and undoing the whole batch in one step.
@@ -264,6 +273,10 @@ No. Old-site, staging, and development-site links are flagged but not fetched. A
 * Initial diagnostic release.
 
 == Upgrade Notice ==
+
+= 1.1.1 =
+
+Fixes grouped repairs for custom menu links, overlapping suggestions, and batches containing uneditable sources. Also corrects source counts and trailing-slash comparisons.
 
 = 1.1.0 =
 

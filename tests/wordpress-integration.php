@@ -552,7 +552,8 @@ try {
 	}
 	indexlane_wp_assert_same( 'indexlane-rila-baseline', $baseline['format'], 'A completed WordPress scan must produce portable baseline evidence.' );
 	indexlane_wp_assert_same( 3, $baseline['schema_version'], 'The baseline must use the destination-intent evidence schema.' );
-	indexlane_wp_assert_same( '1.0.0', $baseline['plugin_version'], 'The saved scan must identify the plugin version that created it.' );
+	$plugin_data = get_plugin_data( dirname( __DIR__ ) . '/indexlane-redirect-internal-link-auditor.php', false, false );
+	indexlane_wp_assert_same( $plugin_data['Version'], $baseline['plugin_version'], 'The saved scan must identify the plugin version that created it.' );
 	indexlane_wp_assert_same( $home, $baseline['site_url'], 'The baseline must be bound to this exact WordPress site URL.' );
 	indexlane_wp_assert_same( 7, $baseline['scope']['total_sources'], 'The baseline must preserve the complete selected source corpus.' );
 	indexlane_wp_assert_same( 7, $baseline['scope']['content_items'], 'The baseline must preserve the selected content-target corpus.' );
@@ -617,6 +618,16 @@ try {
 	wp_set_current_user( $original_user_id );
 	indexlane_wp_assert_same( 7, count( indexlane_wp_invoke( 'get_scan_session' )['results'] ), 'The owning administrator must retain the completed evidence.' );
 	indexlane_wp_assert_same( $baseline['baseline_id'], indexlane_wp_invoke( 'get_saved_baseline' )['baseline_id'], 'The owning administrator must retain the saved baseline.' );
+	// Use real command dispatch and output so registration and JSON regressions fail CI.
+	$cli_output = WP_CLI::runcommand(
+		'indexlane fix-suggested --dry-run --source-types=content --post-types=' . $post_type . ' --format=json',
+		array( 'launch' => false, 'return' => 'all', 'exit_error' => false )
+	);
+	indexlane_wp_assert_same( 0, $cli_output->return_code, 'The documented fix-suggested subcommand must succeed.' );
+	$cli_rows = json_decode( $cli_output->stdout, true );
+	indexlane_wp_assert_same( true, is_array( $cli_rows ), 'Suggested-fix JSON must contain no status text.' );
+	indexlane_wp_assert_same( $home . '/fixture-redirect', $cli_rows[0]['from'], 'CLI output must retain the original URL.' );
+
 } finally {
 	remove_filter( 'pre_http_request', $http_filter, 10 );
 	wp_set_current_user( $administrator->ID );

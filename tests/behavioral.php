@@ -1827,6 +1827,8 @@ indexlane_assert_same( 'warning', indexlane_invoke( 'merge_intent_result_code', 
 indexlane_assert_same( 'ok', indexlane_invoke( 'merge_intent_result_code', array( 'ok', 'info' ) ), 'Informational intent alone must stay OK.' );
 
 // 1.1.0: address intent that compares a stored link with where it is served.
+indexlane_assert_same( false, indexlane_invoke( 'urls_differ_only_by_trailing_slash', array( 'https://example.test/about?lang=EN', 'https://example.test/about/?lang=en' ) ), 'A case-sensitive query change is not a trailing-slash-only difference.' );
+indexlane_assert_same( true, indexlane_invoke( 'urls_differ_only_by_trailing_slash', array( 'https://example.test/about?lang=EN', 'https://example.test/about/?lang=EN' ) ), 'An identical query may accompany a trailing-slash-only difference.' );
 $GLOBALS['indexlane_test_url_post_ids'] = array( 'https://example.test/about' => 611 );
 $GLOBALS['indexlane_test_permalinks']   = array( 611 => 'https://example.test/about/' );
 $GLOBALS['indexlane_test_posts'][611]   = (object) array(

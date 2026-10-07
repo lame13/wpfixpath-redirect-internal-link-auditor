@@ -3,7 +3,7 @@
  * Plugin Name: IndexLane Broken Link & Redirect Auditor
  * Plugin URI: https://indexlane.dev/plugins/redirect-internal-link-auditor
  * Description: Find broken internal links and migration leftovers, preview and undo link repairs, and schedule checks for new problems. Free, with no account required.
- * Version: 1.1.0
+ * Version: 1.1.1
  * Requires at least: 6.0
  * Requires PHP: 7.4
  * Author: IndexLane
@@ -46,7 +46,7 @@ if ( ! class_exists( 'IndexLane_Redirect_Internal_Link_Auditor' ) ) {
 		use IndexLane_Redirect_Internal_Link_Auditor_CLI;
 
 		private const PLUGIN_FILE                     = __FILE__;
-		private const VERSION                         = '1.1.0';
+		private const VERSION                         = '1.1.1';
 		private const SLUG                            = 'indexlane-redirect-internal-link-auditor';
 		private const CAPABILITY                      = 'manage_options';
 		private const NONCE_ACTION                    = 'indexlane_rila_scan_session';

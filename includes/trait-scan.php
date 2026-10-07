@@ -2051,8 +2051,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 		}
 
 		foreach ( array( 'scheme', 'host', 'port', 'query' ) as $component ) {
-			$left_value  = isset( $left_parts[ $component ] ) ? strtolower( (string) $left_parts[ $component ] ) : '';
-			$right_value = isset( $right_parts[ $component ] ) ? strtolower( (string) $right_parts[ $component ] ) : '';
+			$left_value  = isset( $left_parts[ $component ] ) ? (string) $left_parts[ $component ] : '';
+			$right_value = isset( $right_parts[ $component ] ) ? (string) $right_parts[ $component ] : '';
 			if ( $left_value !== $right_value ) {
 				return false;
 			}

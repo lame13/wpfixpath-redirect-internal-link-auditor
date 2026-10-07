@@ -258,6 +258,8 @@ if ( ! class_exists( 'IndexLane_RILA_CLI' ) ) {
 		 *     wp indexlane fix-suggested --dry-run
 		 *     wp indexlane fix-suggested --yes
 		 *
+		 * @subcommand fix-suggested
+		 *
 		 * @param array<int,string>   $args       Positional arguments.
 		 * @param array<string,mixed> $assoc_args Associative arguments.
 		 */
@@ -287,12 +289,16 @@ if ( ! class_exists( 'IndexLane_RILA_CLI' ) ) {
 				);
 			}
 
-			if ( 'table' === $this->format( $assoc_args ) && empty( $rows ) ) {
+			$format = $this->format( $assoc_args );
+			if ( 'table' === $format && empty( $rows ) ) {
 				WP_CLI::warning( __( 'No suggested replacements were found.', 'indexlane-redirect-internal-link-auditor' ) );
 				return;
 			}
 
-			WP_CLI\Utils\format_items( $this->format( $assoc_args ), $rows, array( 'from', 'to' ) );
+			WP_CLI\Utils\format_items( $format, $rows, array( 'from', 'to' ) );
+			if ( 'table' !== $format ) {
+				return;
+			}
 
 			if ( ! empty( $result['skipped'] ) ) {
 				WP_CLI::log( __( 'Suggestions left untouched:', 'indexlane-redirect-internal-link-auditor' ) );

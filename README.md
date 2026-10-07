@@ -362,7 +362,7 @@ WP_CLI_BIN=/path/to/wp ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-
 
 The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded adapter/integration suite, and exercises the authenticated AJAX lifecycle, saved-scan save/upload/download/delete flow, exact-scope fix checks, comparison downloads, coverage filters, and detail views over HTTP.
 
-[Publishing commands for 1.1.0](docs/publishing-1.1.0.md) cover Git, GitHub releases, and the existing WordPress.org SVN checkout. [Release notes for 1.1.0](docs/releases/1.1.0.md) describe what changed in this version.
+[Publishing commands for 1.1.1](docs/publishing-1.1.1.md) cover Git, GitHub releases, and the existing WordPress.org SVN checkout. [Release notes for 1.1.1](docs/releases/1.1.1.md) describe the fixes; the [1.1.0 release notes](docs/releases/1.1.0.md) remain available.
 
 Build the production ZIP for WordPress.org submission:
 
