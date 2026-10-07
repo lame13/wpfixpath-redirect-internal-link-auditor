@@ -168,6 +168,30 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 	}
 
 	/**
+	 * Return the repairable URLs that already have a suggested replacement.
+	 *
+	 * These are the changes the "fix all suggested" review presents, so it only
+	 * includes candidates where the scan produced an editable suggestion.
+	 *
+	 * @param array<int,array<string,mixed>> $results Completed-scan rows.
+	 * @return array<int,array<string,mixed>>
+	 */
+	private static function build_suggested_fix_candidates( array $results ): array {
+		$suggested = array();
+
+		foreach ( self::build_fix_candidates( $results ) as $candidate ) {
+			if ( ! is_array( $candidate ) || '' === (string) $candidate['suggestion'] ) {
+				continue;
+			}
+
+			$candidate['to_url'] = (string) $candidate['suggestion'];
+			$suggested[]         = $candidate;
+		}
+
+		return $suggested;
+	}
+
+	/**
 	 * Propose a replacement URL from the evidence already collected.
 	 *
 	 * @param array<string,mixed> $row Result row.
@@ -175,11 +199,24 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 	private static function suggested_replacement_for_row( array $row ): string {
 		$redirect_count = isset( $row['redirect_count'] ) && is_numeric( $row['redirect_count'] ) ? (int) $row['redirect_count'] : 0;
 		$final_url      = isset( $row['final_url'] ) ? trim( (string) $row['final_url'] ) : '';
+		$stored_url     = isset( $row['linked_url'] ) ? trim( (string) $row['linked_url'] ) : '';
+		$intent_code    = isset( $row['intent_code'] ) ? (string) $row['intent_code'] : '';
+
+		if ( 'scheme_mismatch' === $intent_code && '' !== $stored_url && self::is_same_site_url( $stored_url ) ) {
+			$site_scheme   = strtolower( (string) wp_parse_url( home_url( '/' ), PHP_URL_SCHEME ) );
+			$stored_scheme = strtolower( (string) wp_parse_url( $stored_url, PHP_URL_SCHEME ) );
+			if ( '' !== $site_scheme && '' !== $stored_scheme && $site_scheme !== $stored_scheme ) {
+				$swapped = preg_replace( '#^[a-z][a-z0-9+.-]*://#i', $site_scheme . '://', $stored_url, 1 );
+				if ( is_string( $swapped ) && self::fix_destination_key( $swapped ) !== self::fix_destination_key( $stored_url ) ) {
+					return $swapped;
+				}
+			}
+		}
 
 		if ( $redirect_count > 0 && '' !== $final_url && self::is_same_site_url( $final_url ) ) {
 			$final_status = self::final_status_from_evidence( isset( $row['http_status'] ) ? (string) $row['http_status'] : '' );
-			if ( $final_status >= 200 && $final_status < 300 && self::fix_destination_key( $final_url ) !== self::fix_destination_key( isset( $row['linked_url'] ) ? (string) $row['linked_url'] : '' ) ) {
-				$fragment = self::link_fragment_from_href( isset( $row['linked_url'] ) ? (string) $row['linked_url'] : '' );
+			if ( $final_status >= 200 && $final_status < 300 && self::fix_destination_key( $final_url ) !== self::fix_destination_key( $stored_url ) ) {
+				$fragment = self::link_fragment_from_href( $stored_url );
 				return false === strpos( $final_url, '#' ) && '' !== $fragment ? $final_url . '#' . $fragment : $final_url;
 			}
 		}
@@ -188,9 +225,19 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 			$target_id = isset( $row[ $field ] ) ? (int) $row[ $field ] : 0;
 			if ( $target_id > 0 && function_exists( 'get_permalink' ) ) {
 				$permalink = get_permalink( $target_id );
-				if ( is_string( $permalink ) && '' !== $permalink && false === strpos( $permalink, '?' ) ) {
-					return $permalink;
+				if ( ! is_string( $permalink ) || '' === $permalink || false !== strpos( $permalink, '?' ) ) {
+					continue;
 				}
+				// Keep the stored section so a repair never drops a linked fragment.
+				$fragment = self::link_fragment_from_href( $stored_url );
+				if ( '' !== $fragment && false === strpos( $permalink, '#' ) ) {
+					$permalink .= '#' . $fragment;
+				}
+				if ( self::fix_destination_key( $permalink ) === self::fix_destination_key( $stored_url ) ) {
+					continue;
+				}
+
+				return $permalink;
 			}
 		}
 
@@ -206,6 +253,14 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 		$redirect_count = isset( $row['redirect_count'] ) && is_numeric( $row['redirect_count'] ) ? (int) $row['redirect_count'] : 0;
 		if ( $redirect_count > 0 && '' !== trim( isset( $row['final_url'] ) ? (string) $row['final_url'] : '' ) ) {
 			return __( 'Suggested from the final URL this link redirects to.', 'indexlane-redirect-internal-link-auditor' );
+		}
+
+		$intent_code = isset( $row['intent_code'] ) ? (string) $row['intent_code'] : '';
+		if ( 'scheme_mismatch' === $intent_code ) {
+			return __( 'Suggested by matching the site address scheme.', 'indexlane-redirect-internal-link-auditor' );
+		}
+		if ( 'permalink_mismatch' === $intent_code ) {
+			return __( 'Suggested from the address WordPress serves for this content.', 'indexlane-redirect-internal-link-auditor' );
 		}
 
 		return __( 'Suggested from the published content this link resolves to.', 'indexlane-redirect-internal-link-auditor' );
@@ -319,6 +374,162 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 			'sources'       => count( $items ),
 			'occurrences'   => $occurrences,
 			'changes'       => $change_count,
+			'journal_bytes' => $journal_bytes,
+		);
+	}
+
+	/**
+	 * Build one batch repair plan from every suggested replacement in a scan.
+	 *
+	 * Each suggested URL is prepared exactly like a single repair, then the
+	 * per-source items are folded together so a source that contains more than
+	 * one suggested URL is written once with every change applied. The result
+	 * is one confirmable plan and, when applied, one undoable journal entry.
+	 *
+	 * @param array<string,mixed> $scan            Completed scan session.
+	 * @param array<int,string>|null $include_from_url Stored URLs to include, or null for every suggestion.
+	 * @return array<string,mixed>|WP_Error
+	 */
+	private static function build_fix_all_plan( array $scan, ?array $include_from_url = null ) {
+		$results    = isset( $scan['results'] ) && is_array( $scan['results'] ) ? $scan['results'] : array();
+		$candidates = self::build_suggested_fix_candidates( $results );
+
+		if ( is_array( $include_from_url ) ) {
+			if ( empty( $include_from_url ) ) {
+				return new WP_Error( 'fix_all_none_selected', __( 'Select at least one suggested change to review.', 'indexlane-redirect-internal-link-auditor' ) );
+			}
+
+			$wanted = array();
+			foreach ( $include_from_url as $from_url ) {
+				$key = self::fix_destination_key( (string) $from_url );
+				if ( '' !== $key ) {
+					$wanted[ $key ] = true;
+				}
+			}
+
+			$candidates = array_values(
+				array_filter(
+					$candidates,
+					static function ( array $candidate ) use ( $wanted ): bool {
+						return isset( $wanted[ self::fix_destination_key( (string) $candidate['from_url'] ) ] );
+					}
+				)
+			);
+		}
+
+		if ( empty( $candidates ) ) {
+			return new WP_Error( 'fix_all_none', __( 'No link in these results has a suggested replacement.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$groups  = array();
+		$skipped = array();
+
+		foreach ( $candidates as $candidate ) {
+			$plan = self::build_fix_plan( $scan, (string) $candidate['from_url'], (string) $candidate['to_url'] );
+			if ( is_wp_error( $plan ) ) {
+				$skipped[] = array(
+					'from_url' => (string) $candidate['from_url'],
+					'to_url'   => (string) $candidate['to_url'],
+					'reason'   => $plan->get_error_message(),
+				);
+				continue;
+			}
+
+			foreach ( (array) $plan['skipped'] as $group_skip ) {
+				$group_skip['from_url'] = (string) $plan['from_url'];
+				$skipped[]              = $group_skip;
+			}
+
+			$groups[] = array(
+				'from_url'         => (string) $plan['from_url'],
+				'to_url'           => (string) $plan['to_url'],
+				'suggestion_label' => (string) $candidate['suggestion_label'],
+				'items'            => (array) $plan['items'],
+			);
+		}
+
+		if ( empty( $groups ) ) {
+			return new WP_Error( 'fix_all_nothing_editable', __( 'None of the suggested links could be prepared for repair. Review the skipped suggestions in these results.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$merged = array();
+		$order  = array();
+
+		foreach ( $groups as $group ) {
+			foreach ( $group['items'] as $item ) {
+				$key = (string) $item['storage'] . ':' . (int) $item['target_id'] . ':' . (string) $item['target_sub'];
+				if ( ! isset( $merged[ $key ] ) ) {
+					$merged[ $key ]                = $item;
+					$merged[ $key ]['after']       = (string) $item['before'];
+					$merged[ $key ]['occurrences'] = 0;
+					$order[ $key ]                 = true;
+				}
+
+				$folded = self::replace_stored_link_url( (string) $merged[ $key ]['after'], (string) $group['from_url'], (string) $group['to_url'], (string) $merged[ $key ]['base_url'] );
+				if ( $folded['replacements'] < 1 ) {
+					$skipped[] = array(
+						'from_url'     => (string) $group['from_url'],
+						'to_url'       => (string) $group['to_url'],
+						'source_title' => (string) $item['source_title'],
+						'edit_url'     => (string) $item['edit_url'],
+						'reason'       => __( 'This source did not store the suggested link when the batch was prepared.', 'indexlane-redirect-internal-link-auditor' ),
+					);
+					continue;
+				}
+
+				$merged[ $key ]['after']        = $folded['content'];
+				$merged[ $key ]['occurrences'] += (int) $folded['replacements'];
+			}
+		}
+
+		$items = array();
+		foreach ( array_keys( $order ) as $key ) {
+			if ( (string) $merged[ $key ]['after'] === (string) $merged[ $key ]['before'] ) {
+				continue;
+			}
+
+			$items[] = $merged[ $key ];
+		}
+
+		if ( empty( $items ) ) {
+			return new WP_Error( 'fix_all_nothing_editable', __( 'No selected source could be updated. Nothing was changed.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		if ( count( $items ) > self::FIX_MAX_ITEMS_PER_BATCH ) {
+			return new WP_Error( 'fix_too_many_items', __( 'These changes would edit too many sources at once. Narrow the scan, or repair the URLs in smaller groups.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$occurrences   = 0;
+		$journal_bytes = 0;
+		foreach ( $items as $item ) {
+			$occurrences += isset( $item['occurrences'] ) ? (int) $item['occurrences'] : 1;
+			$encoded      = wp_json_encode( $item );
+			$journal_bytes += is_string( $encoded ) ? strlen( $encoded ) : self::FIX_JOURNAL_MAX_BYTES;
+		}
+
+		if ( $journal_bytes + 1024 > self::FIX_JOURNAL_MAX_BYTES ) {
+			return new WP_Error( 'fix_too_large', __( 'These repairs are too large to record reversible changes. Fix fewer URLs at once, or use the source editing links.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$pairs = array();
+		foreach ( $groups as $group ) {
+			$pairs[] = array(
+				'from_url'         => (string) $group['from_url'],
+				'to_url'           => (string) $group['to_url'],
+				'suggestion_label' => (string) $group['suggestion_label'],
+			);
+		}
+
+		return array(
+			'batch'         => true,
+			'from_url'      => '',
+			'to_url'        => '',
+			'pairs'         => $pairs,
+			'items'         => $items,
+			'skipped'       => array_values( $skipped ),
+			'sources'       => count( $items ),
+			'occurrences'   => $occurrences,
+			'changes'       => $occurrences,
 			'journal_bytes' => $journal_bytes,
 		);
 	}
@@ -769,6 +980,18 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 		} );
 	}
 
+	/**
+	 * Apply one confirmed batch of suggested fixes as a single undoable entry.
+	 *
+	 * @param array<string,mixed> $plan Batch repair plan.
+	 * @return array<string,mixed>|WP_Error
+	 */
+	private static function apply_fix_all_plan( array $plan ) {
+		return self::with_fix_lock( static function () use ( $plan ) {
+			return self::apply_fix_plan_locked( $plan );
+		} );
+	}
+
 	/** Execute this operation while holding the repair journal lock. */
 	private static function apply_fix_plan_locked( array $plan ) {
 		$items   = isset( $plan['items'] ) && is_array( $plan['items'] ) ? $plan['items'] : array();
@@ -801,6 +1024,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 			'status'     => 'applied',
 			'items'      => $ready,
 		);
+		if ( ! empty( $plan['pairs'] ) && is_array( $plan['pairs'] ) ) {
+			$batch['kind']  = 'suggested';
+			$batch['pairs'] = array_values( $plan['pairs'] );
+		}
 		// Save undo evidence before the first content write. A failed journal
 		// write must never leave a successful but unrecorded repair behind.
 		$journal = self::get_fix_journal();
@@ -1173,7 +1400,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 		}
 
 		$action = isset( $_POST['indexlane_rila_action'] ) ? sanitize_key( wp_unslash( $_POST['indexlane_rila_action'] ) ) : '';
-		if ( ! in_array( $action, array( 'fix_preview', 'fix_apply', 'fix_undo' ), true ) ) {
+		if ( ! in_array( $action, array( 'fix_preview', 'fix_apply', 'fix_undo', 'fix_preview_all', 'fix_apply_all' ), true ) ) {
 			return;
 		}
 
@@ -1196,6 +1423,48 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 		$session = self::get_scan_session();
 		if ( ! is_array( $session ) || 'complete' !== $session['status'] ) {
 			self::redirect_after_fix_action( 'missing_scan', '' );
+		}
+
+		if ( 'fix_preview_all' === $action || 'fix_apply_all' === $action ) {
+			$selection = self::requested_fix_selection();
+			$plan      = self::build_fix_all_plan( $session, $selection );
+			if ( is_wp_error( $plan ) ) {
+				self::redirect_after_fix_action( 'plan_failed', $plan->get_error_message() );
+			}
+
+			if ( 'fix_preview_all' === $action ) {
+				self::$pending_fix_plan = $plan;
+				return;
+			}
+
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- Verified against this exact plan below.
+			$confirmation = isset( $_POST['fix_confirmation'] ) && is_string( $_POST['fix_confirmation'] ) ? wp_unslash( $_POST['fix_confirmation'] ) : '';
+			if ( ! wp_verify_nonce( $confirmation, self::fix_confirmation_action( $plan ) ) ) {
+				self::redirect_after_fix_action( 'plan_failed', __( 'The selected suggestions or their sources changed since the preview. Review the suggested changes again before applying them.', 'indexlane-redirect-internal-link-auditor' ) );
+			}
+
+			$result = self::apply_fix_all_plan( $plan );
+			if ( is_wp_error( $result ) ) {
+				self::redirect_after_fix_action( 'apply_failed', $result->get_error_message() );
+			}
+
+			$detail = sprintf(
+				/* translators: 1: number of link occurrences replaced, 2: number of stored sources changed, 3: number of stored URLs repaired */
+				_n( '%1$d link replacement in %2$d source across %3$d URL.', '%1$d link replacements in %2$d sources across %3$d URLs.', (int) $result['occurrences'], 'indexlane-redirect-internal-link-auditor' ),
+				(int) $result['occurrences'],
+				(int) $result['sources'],
+				count( $plan['pairs'] )
+			);
+
+			if ( ! empty( $result['skipped'] ) ) {
+				$detail .= ' ' . sprintf(
+					/* translators: %d: number of stored sources left untouched */
+					_n( '%d source was left untouched.', '%d sources were left untouched.', count( $result['skipped'] ), 'indexlane-redirect-internal-link-auditor' ),
+					count( $result['skipped'] )
+				);
+			}
+
+			self::redirect_after_fix_action( 'applied', $detail );
 		}
 
 		// phpcs:disable WordPress.Security.NonceVerification.Missing -- The action nonce is verified before these URLs are read.
@@ -1249,6 +1518,38 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 	 */
 	private static function fix_confirmation_action( array $plan ): string {
 		return 'indexlane_rila_fix_' . hash( 'sha256', (string) wp_json_encode( $plan ) );
+	}
+
+	/**
+	 * Read the stored URLs selected in a suggested-fix review.
+	 *
+	 * A missing field means full selection; an empty array means the reviewer
+	 * unchecked every suggestion.
+	 *
+	 * @return array<int,string>|null
+	 */
+	private static function requested_fix_selection(): ?array {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- The caller verifies the action nonce before reading this selection.
+		if ( ! isset( $_POST['include_present'] ) ) {
+			return null;
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- The caller verifies the action nonce before reading this selection.
+		$raw = isset( $_POST['include'] ) && is_array( $_POST['include'] ) ? wp_unslash( $_POST['include'] ) : array();
+
+		$selected = array();
+		foreach ( $raw as $value ) {
+			if ( ! is_scalar( $value ) ) {
+				continue;
+			}
+
+			$url = esc_url_raw( trim( (string) $value ) );
+			if ( '' !== $url ) {
+				$selected[] = $url;
+			}
+		}
+
+		return array_values( array_unique( $selected ) );
 	}
 
 	/**
@@ -1350,6 +1651,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 		$all        = self::build_fix_candidates( $results );
 		$candidates = array_slice( $all, 0, self::FIX_MAX_CANDIDATES_IN_PANEL );
 		$truncated  = count( $all ) - count( $candidates );
+		$suggested  = self::build_suggested_fix_candidates( $results );
 		$journal    = self::get_fix_journal();
 
 		// phpcs:ignore WordPress.Security.NonceVerification.Recommended -- Prefills one field from an already-rendered link on this page.
@@ -1364,6 +1666,46 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 
 			<?php if ( is_array( self::$pending_fix_plan ) ) : ?>
 				<?php self::render_fix_preview( self::$pending_fix_plan ); ?>
+			<?php endif; ?>
+
+			<?php if ( ! empty( $suggested ) && ! ( is_array( self::$pending_fix_plan ) && ! empty( self::$pending_fix_plan['batch'] ) ) ) : ?>
+				<?php
+				$suggested_sources = 0;
+				foreach ( $suggested as $suggested_candidate ) {
+					$suggested_sources += (int) $suggested_candidate['affected_sources'];
+				}
+				?>
+				<div class="indexlane-rila-fix-suggested">
+					<h3><?php esc_html_e( 'Apply suggested fixes', 'indexlane-redirect-internal-link-auditor' ); ?></h3>
+					<p class="description">
+						<?php esc_html_e( 'Some links already have a suggested replacement from the redirect target or the content they resolve to. Review every suggested change, then apply the ones you keep as a single change you can undo in one step.', 'indexlane-redirect-internal-link-auditor' ); ?>
+					</p>
+					<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-fix-suggested-form">
+						<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+						<button type="submit" name="indexlane_rila_action" value="fix_preview_all" class="button button-secondary">
+							<?php
+							echo esc_html(
+								sprintf(
+									/* translators: %d: number of URLs with a suggested replacement */
+									_n( 'Review %d suggested fix', 'Review %d suggested fixes', count( $suggested ), 'indexlane-redirect-internal-link-auditor' ),
+									count( $suggested )
+								)
+							);
+							?>
+						</button>
+						<span class="description">
+							<?php
+							echo esc_html(
+								sprintf(
+									/* translators: %d: number of stored sources a suggested batch would change */
+									_n( 'Would change %d stored source.', 'Would change %d stored sources.', (int) $suggested_sources, 'indexlane-redirect-internal-link-auditor' ),
+									(int) $suggested_sources
+								)
+							);
+							?>
+						</span>
+					</form>
+				</div>
 			<?php endif; ?>
 
 			<?php if ( empty( $candidates ) ) : ?>
@@ -1455,6 +1797,11 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 	 * @param array<string,mixed> $plan Repair plan.
 	 */
 	private static function render_fix_preview( array $plan ): void {
+		if ( ! empty( $plan['batch'] ) ) {
+			self::render_fix_all_preview( $plan );
+			return;
+		}
+
 		$items   = isset( $plan['items'] ) && is_array( $plan['items'] ) ? $plan['items'] : array();
 		$skipped = isset( $plan['skipped'] ) && is_array( $plan['skipped'] ) ? $plan['skipped'] : array();
 		?>
@@ -1548,6 +1895,149 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 	}
 
 	/**
+	 * Render the exact, unapplied changes in one suggested-fix batch plan.
+	 *
+	 * @param array<string,mixed> $plan Batch repair plan.
+	 */
+	private static function render_fix_all_preview( array $plan ): void {
+		$items   = isset( $plan['items'] ) && is_array( $plan['items'] ) ? $plan['items'] : array();
+		$pairs   = isset( $plan['pairs'] ) && is_array( $plan['pairs'] ) ? $plan['pairs'] : array();
+		$skipped = isset( $plan['skipped'] ) && is_array( $plan['skipped'] ) ? $plan['skipped'] : array();
+		?>
+		<div class="indexlane-rila-fix-preview indexlane-rila-fix-preview-all">
+			<h3><?php esc_html_e( 'Review the suggested changes', 'indexlane-redirect-internal-link-auditor' ); ?></h3>
+			<p>
+				<?php
+				echo esc_html(
+					sprintf(
+						/* translators: 1: number of stored URLs repaired, 2: number of link occurrences replaced, 3: number of stored sources changed */
+						_n( '%1$d suggested URL changes %2$d link occurrence in %3$d source. Nothing has been written yet.', '%1$d suggested URLs change %2$d link occurrences in %3$d sources. Nothing has been written yet.', count( $pairs ), 'indexlane-redirect-internal-link-auditor' ),
+						count( $pairs ),
+						(int) $plan['occurrences'],
+						(int) $plan['sources']
+					)
+				);
+				?>
+			</p>
+
+			<form method="post" action="<?php echo esc_url( self::admin_page_url() ); ?>" class="indexlane-rila-fix-apply indexlane-rila-fix-apply-all">
+				<?php wp_nonce_field( self::fix_confirmation_action( $plan ), 'fix_confirmation' ); ?>
+				<?php wp_nonce_field( self::NONCE_ACTION, self::NONCE_NAME ); ?>
+				<input type="hidden" name="include_present" value="1" />
+
+				<fieldset class="indexlane-rila-fix-suggestions">
+					<legend><?php esc_html_e( 'Suggested changes to apply', 'indexlane-redirect-internal-link-auditor' ); ?></legend>
+					<p class="description"><?php esc_html_e( 'Clear a suggestion you want to keep as it is, then select Update preview to review the remaining changes.', 'indexlane-redirect-internal-link-auditor' ); ?></p>
+					<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Suggested changes to apply', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
+					<table class="widefat striped indexlane-rila-fix-suggestions-table">
+						<thead>
+							<tr>
+								<th><?php esc_html_e( 'Apply', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Stored URL', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+								<th><?php esc_html_e( 'Suggested replacement', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							</tr>
+						</thead>
+						<tbody>
+							<?php foreach ( $pairs as $pair ) : ?>
+								<tr>
+									<td>
+										<label class="screen-reader-text" for="<?php echo esc_attr( 'indexlane-rila-include-' . md5( (string) $pair['from_url'] ) ); ?>">
+											<?php esc_html_e( 'Apply this suggested change', 'indexlane-redirect-internal-link-auditor' ); ?>
+										</label>
+										<input
+											id="<?php echo esc_attr( 'indexlane-rila-include-' . md5( (string) $pair['from_url'] ) ); ?>"
+											type="checkbox"
+											name="include[]"
+											value="<?php echo esc_attr( (string) $pair['from_url'] ); ?>"
+											checked
+										/>
+									</td>
+									<td><code><?php echo esc_html( (string) $pair['from_url'] ); ?></code></td>
+									<td>
+										<code><?php echo esc_html( (string) $pair['to_url'] ); ?></code>
+										<?php if ( '' !== (string) $pair['suggestion_label'] ) : ?>
+											<span class="indexlane-rila-cell-note"><?php echo esc_html( (string) $pair['suggestion_label'] ); ?></span>
+										<?php endif; ?>
+									</td>
+								</tr>
+							<?php endforeach; ?>
+						</tbody>
+					</table>
+					</div>
+				</fieldset>
+
+				<h4><?php esc_html_e( 'Every source that will change', 'indexlane-redirect-internal-link-auditor' ); ?></h4>
+				<div class="indexlane-rila-table-scroll" role="region" aria-label="<?php esc_attr_e( 'Every source that will change', 'indexlane-redirect-internal-link-auditor' ); ?>" tabindex="0">
+				<table class="widefat striped indexlane-rila-fix-preview-table">
+					<thead>
+						<tr>
+							<th><?php esc_html_e( 'Source', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th><?php esc_html_e( 'Surface', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th><?php esc_html_e( 'Stored value', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th><?php esc_html_e( 'New value', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+							<th><?php esc_html_e( 'Links changed', 'indexlane-redirect-internal-link-auditor' ); ?></th>
+						</tr>
+					</thead>
+					<tbody>
+						<?php foreach ( $items as $item ) : ?>
+							<tr>
+								<td>
+									<?php if ( '' !== (string) $item['edit_url'] ) : ?>
+										<a href="<?php echo esc_url( (string) $item['edit_url'] ); ?>"><?php echo esc_html( (string) $item['source_title'] ); ?></a>
+									<?php else : ?>
+										<?php echo esc_html( (string) $item['source_title'] ); ?>
+									<?php endif; ?>
+								</td>
+								<td><?php echo esc_html( (string) $item['source_type'] ); ?></td>
+								<td><details><summary><?php esc_html_e( 'View full stored value', 'indexlane-redirect-internal-link-auditor' ); ?></summary><code><?php echo esc_html( (string) $item['before'] ); ?></code></details></td>
+								<td><details><summary><?php esc_html_e( 'View full stored value', 'indexlane-redirect-internal-link-auditor' ); ?></summary><code><?php echo esc_html( (string) $item['after'] ); ?></code></details></td>
+								<td><?php echo esc_html( (string) (int) $item['occurrences'] ); ?></td>
+							</tr>
+						<?php endforeach; ?>
+					</tbody>
+				</table>
+				</div>
+
+				<?php if ( ! empty( $skipped ) ) : ?>
+					<h4><?php esc_html_e( 'Suggestions that cannot be changed here', 'indexlane-redirect-internal-link-auditor' ); ?></h4>
+					<ul class="indexlane-rila-fix-skipped">
+						<?php foreach ( $skipped as $item ) : ?>
+							<li>
+								<?php if ( ! empty( $item['edit_url'] ) ) : ?>
+									<a href="<?php echo esc_url( (string) $item['edit_url'] ); ?>"><?php echo esc_html( (string) ( $item['source_title'] ?? $item['from_url'] ?? '' ) ); ?></a>
+								<?php else : ?>
+									<code><?php echo esc_html( (string) ( $item['source_title'] ?? $item['from_url'] ?? '' ) ); ?></code>
+								<?php endif; ?>
+								<span><?php echo esc_html( (string) ( $item['reason'] ?? '' ) ); ?></span>
+							</li>
+						<?php endforeach; ?>
+					</ul>
+				<?php endif; ?>
+
+				<p class="indexlane-rila-fix-apply-actions">
+					<button type="submit" name="indexlane_rila_action" value="fix_apply_all" class="button button-primary" data-indexlane-rila-confirm="<?php esc_attr_e( 'Apply every selected suggested change now?', 'indexlane-redirect-internal-link-auditor' ); ?>">
+						<?php
+						echo esc_html(
+							sprintf(
+								/* translators: %d: number of stored sources that will change */
+								_n( 'Apply changes in %d source', 'Apply changes in %d sources', (int) $plan['sources'], 'indexlane-redirect-internal-link-auditor' ),
+								(int) $plan['sources']
+							)
+						);
+						?>
+					</button>
+					<button type="submit" name="indexlane_rila_action" value="fix_preview_all" class="button">
+						<?php esc_html_e( 'Update preview', 'indexlane-redirect-internal-link-auditor' ); ?>
+					</button>
+					<a class="button" href="<?php echo esc_url( self::admin_page_url() ); ?>#indexlane-rila-fix"><?php esc_html_e( 'Cancel', 'indexlane-redirect-internal-link-auditor' ); ?></a>
+					<span class="description"><?php esc_html_e( 'Expand the stored values to review every change before applying the batch.', 'indexlane-redirect-internal-link-auditor' ); ?></span>
+				</p>
+			</form>
+		</div>
+		<?php
+	}
+
+	/**
 	 * Build a short, honest preview snippet around the changed URL.
 	 *
 	 * @param string $value  Stored or new value.
@@ -1606,9 +2096,34 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Fixes {
 					<tr>
 						<td><?php echo esc_html( $when ); ?></td>
 						<td>
-							<code><?php echo esc_html( (string) $batch['from_url'] ); ?></code>
-							<br />
-							<code><?php echo esc_html( (string) $batch['to_url'] ); ?></code>
+							<?php
+							$batch_pairs = isset( $batch['pairs'] ) && is_array( $batch['pairs'] ) ? $batch['pairs'] : array();
+							if ( ! empty( $batch_pairs ) ) :
+								?>
+								<strong>
+									<?php
+									echo esc_html(
+										sprintf(
+											/* translators: %d: number of stored URLs repaired together */
+											_n( '%d suggested fix', '%d suggested fixes', count( $batch_pairs ), 'indexlane-redirect-internal-link-auditor' ),
+											count( $batch_pairs )
+										)
+									);
+									?>
+								</strong>
+								<details>
+									<summary><?php esc_html_e( 'View the changed URLs', 'indexlane-redirect-internal-link-auditor' ); ?></summary>
+									<ul>
+										<?php foreach ( $batch_pairs as $batch_pair ) : ?>
+											<li><code><?php echo esc_html( (string) $batch_pair['from_url'] ); ?></code> → <code><?php echo esc_html( (string) $batch_pair['to_url'] ); ?></code></li>
+										<?php endforeach; ?>
+									</ul>
+								</details>
+							<?php else : ?>
+								<code><?php echo esc_html( (string) $batch['from_url'] ); ?></code>
+								<br />
+								<code><?php echo esc_html( (string) $batch['to_url'] ); ?></code>
+							<?php endif; ?>
 						</td>
 						<td><?php echo esc_html( (string) count( (array) $batch['items'] ) ); ?></td>
 						<td><?php echo esc_html( $status ); ?></td>

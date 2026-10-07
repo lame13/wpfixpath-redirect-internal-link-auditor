@@ -903,6 +903,51 @@
 	background: #fff;
 }
 
+.indexlane-rila-fix-suggested {
+	max-width: 1080px;
+	margin: 18px 0 28px;
+	padding: 14px 20px 16px;
+	border: 1px solid #c3c4c7;
+	border-left: 4px solid #2271b1;
+	background: #fff;
+}
+
+.indexlane-rila-fix-suggested > h3 {
+	margin-top: 0;
+}
+
+.indexlane-rila-fix-suggested-form,
+.indexlane-rila-fix-apply-actions {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 10px;
+	margin: 0;
+}
+
+.indexlane-rila-fix-apply-actions {
+	margin-top: 18px;
+}
+
+.indexlane-rila-fix-suggestions {
+	margin: 0 0 20px;
+	padding: 0;
+	border: 0;
+}
+
+.indexlane-rila-fix-suggestions legend {
+	padding: 0;
+	font-weight: 600;
+}
+
+.indexlane-rila-fix-suggestions-table code {
+	display: inline-block;
+	max-width: 420px;
+	overflow-wrap: anywhere;
+	white-space: normal;
+	vertical-align: middle;
+}
+
 .indexlane-rila-fix-preview > h3 {
 	margin-top: 0;
 }

@@ -4,7 +4,7 @@ Tags: redirects, broken links, internal links, migration, audit
 Requires at least: 6.0
 Tested up to: 7.1
 Requires PHP: 7.4
-Stable tag: 1.0.0
+Stable tag: 1.1.0
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -22,7 +22,7 @@ It's free, runs inside WordPress, and needs no account or external scanning serv
 
 Check internal links for broken pages, redirects, and redirect chains. Add your old domains to find migration leftovers; common staging and development domains are flagged too, without contacting those sites.
 
-A page can return a successful response and still deserve a look. IndexLane also flags a different canonical URL, noindex directives, meta-refresh redirects, and missing linked sections such as `#pricing`. These appear beside the HTTP result under **Page intent**, so you can judge what needs changing.
+A page can return a successful response and still deserve a look. IndexLane also flags a different canonical URL, noindex directives, meta-refresh redirects, missing linked sections such as `#pricing`, a link that uses a different scheme than the site address, and a link whose trailing slash differs from the address WordPress serves for it. These appear beside the HTTP result under **Page intent**, so you can judge what needs changing.
 
 = Go straight to the source =
 
@@ -33,6 +33,8 @@ Choose from published posts, pages and public custom post types; classic menus; 
 = Fix a URL without hunting through every page =
 
 Under **Fix links**, enter a replacement URL and select **Preview changes**. Review the affected sources and expand the full before-and-after values, then apply the repair. A redirect's final URL may be offered as a suggestion; you choose whether to use it.
+
+When the scan already suggests a replacement for several URLs, select **Review suggested fixes**, keep or clear each suggestion, and apply the ones you keep as a single batch. A source holding more than one suggested URL is written once, and one **Undo** restores the whole batch.
 
 Repairs change matching stored link attributes and supported block link settings. Recent repairs keep an undo history. Undo skips sources edited since the repair, so it won't discard your later work.
 
@@ -58,19 +60,19 @@ Schedules use WP-Cron and depend on site visits or your server's cron setup. If 
 4. Preview a replacement under **Fix links**, or use an editing link to make the change yourself.
 5. Run **Check fixes against saved scan** and review the comparison.
 
-The [illustrated walkthrough](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/quick-start.md) shows a broken footer link and an outdated service URL on a small demo site.
+The [illustrated walkthrough](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.1.0/docs/quick-start.md) shows a broken footer link and an outdated service URL on a small demo site.
 
 = See what the reports include =
 
 These sample CSVs use fictional site data:
 
-* [Problem URLs](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/sample-destination-impact.csv): destinations that need attention and the sources linking to them.
-* [Link details](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/sample-report.csv): individual links, editing locations, HTTP results, and page intent.
-* [Content coverage](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/docs/sample-target-coverage.csv): incoming and outgoing links within the selected sources.
+* [Problem URLs](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.1.0/docs/sample-destination-impact.csv): destinations that need attention and the sources linking to them.
+* [Link details](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.1.0/docs/sample-report.csv): individual links, editing locations, HTTP results, and page intent.
+* [Content coverage](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.1.0/docs/sample-target-coverage.csv): incoming and outgoing links within the selected sources.
 
 Downloads reuse completed scan results without making another scan. You can also download or upload a saved scan as site-specific JSON.
 
-Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor). Developers can add stored-source adapters through the filter documented in the [project README](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.0.0/README.md).
+Learn more at [IndexLane](https://indexlane.dev/plugins/redirect-internal-link-auditor). Developers can add stored-source adapters through the filter documented in the [project README](https://github.com/lame13/wpfixpath-redirect-internal-link-auditor/blob/1.1.0/README.md).
 
 == WP-CLI ==
 
@@ -78,6 +80,7 @@ Agencies and deployment scripts can run the same checks without a browser:
 
 * `wp indexlane scan --content-scope=all --format=table` checks the site and lists the URLs that need attention.
 * `wp indexlane fix --from=OLD --to=NEW --dry-run` previews an exact replacement; the same command without `--dry-run` applies it.
+* `wp indexlane fix-suggested --dry-run` previews every suggested replacement as one batch; add `--yes` to apply it.
 * `wp indexlane undo` restores the most recent repair, and `wp indexlane repairs` lists the recorded history.
 
 == Data handling ==
@@ -142,6 +145,13 @@ No. Old-site, staging, and development-site links are flagged but not fetched. A
 4. Read the Page intent column beside HTTP results and original linked fragments in Link details.
 
 == Changelog ==
+
+= 1.1.0 =
+
+* Fix the suggested links in one reviewed batch, leaving out any suggestion you do not want and undoing the whole batch in one step.
+* Added Page intent checks for a link that uses a different scheme than the site address and for a link whose trailing slash differs from the address WordPress serves for it.
+* A source that contains several suggested URLs is written once, and repairs still skip any source edited after the preview.
+* Added `wp indexlane fix-suggested` for previewing or applying the same batch from a script.
 
 = 1.0.0 =
 
@@ -254,6 +264,10 @@ No. Old-site, staging, and development-site links are flagged but not fetched. A
 * Initial diagnostic release.
 
 == Upgrade Notice ==
+
+= 1.1.0 =
+
+You can now review and apply every suggested link replacement as one batch that a single Undo restores, and scans flag a wrong link scheme or trailing slash beside the HTTP result. Scans still leave your content unchanged.
 
 = 1.0.0 =
 

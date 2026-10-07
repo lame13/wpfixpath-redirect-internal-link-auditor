@@ -96,6 +96,8 @@ The comparison is derived entirely from retained results. It never rescans durin
 
 Under **Fix links**, every stored URL that needs attention gets one replacement field.
 
+**Fix the suggested links in one reviewed batch.** When the scan already suggests a replacement for several URLs, select **Review suggested fixes** to see every from-and-to pair, keep or clear each suggestion, and apply the ones you keep as a single change. A source holding more than one suggested URL is folded into one write, and a single **Undo** restores the whole batch. The same batch is available from the command line with `wp indexlane fix-suggested`.
+
 - IndexLane suggests the final URL when a redirect chain ends at a success status, and the permalink of published content when the evidence resolves to one. The suggestion is editable.
 - **Preview changes** lists every affected source, its surface, and its exact previous and new stored value. Nothing is written during the preview.
 - Applying the repair replaces only the exact URL. A site-relative stored link stays site-relative; an absolute one stays absolute; a link carrying `#fragment` is only matched when the stored fragment is identical.
@@ -137,11 +139,13 @@ wp indexlane scan --content-scope=all --format=table
 wp indexlane scan --source-types=content,menu --old-domains=old.example.com --format=json
 wp indexlane fix --from=https://example.com/old/ --to=https://example.com/new/ --dry-run
 wp indexlane fix --from=https://example.com/old/ --to=https://example.com/new/ --yes
+wp indexlane fix-suggested --dry-run
+wp indexlane fix-suggested --yes
 wp indexlane repairs --format=table
 wp indexlane undo --yes
 ```
 
-`--dry-run` prints the exact sources and occurrence counts that would change without writing anything. A real repair prints the batch ID and the command that undoes it.
+`--dry-run` prints the exact sources and occurrence counts that would change without writing anything. `fix-suggested` reviews every suggested replacement as one batch; add `--from` to limit it to specific stored URLs. A real repair prints the batch ID and the command that undoes it.
 
 ## What it checks
 
@@ -155,6 +159,7 @@ wp indexlane undo --yes
 - links that answer with `200` but still point somewhere else through a canonical or a meta refresh;
 - links whose page is marked `noindex` in the response header or the robots meta tag;
 - links whose stored fragment, such as `/pricing/#enterprise`, no longer exists on the page;
+- links that use a different scheme than the site address, or a trailing slash that differs from the address WordPress serves for the content they point to;
 - exact source, source surface, scope, edit URL, link text, status chain, redirect count, final URL, warning, page intent, and outcome.
 
 Unrelated external links are skipped. Old, staging, and development-domain links are reported but never fetched.
@@ -170,11 +175,13 @@ The inspection records:
 - a meta refresh target;
 - the `id` and anchor `name` targets stored in the fetched page, used to confirm linked fragments;
 - the response content type, so a PDF or image destination is reported as a file instead of a broken page;
+- the scheme of a same-site link, so a stored `http://` link on an `https://` site is reported;
+- whether a same-site link that resolves to published content is stored with the exact address WordPress serves, so a trailing-slash difference is reported;
 - each occurrence's stored `rel` attribute, so an internal `nofollow` is reported conservatively.
 
 Findings are classified separately from transport results. Intent only upgrades a healthy response: a different or off-site canonical, and `noindex`, move a `200` response to needs review; a meta refresh or a missing fragment moves it to warning; a file response, an inconclusive fragment, a page-level `nofollow`, and an internal `nofollow` are informational and never create an actionable issue. A destination that already redirects, is blocked, or is broken keeps the outcome its transport evidence produced — a `301` to a page whose canonical differs again stays a warning — and its page intent is reported beside that result.
 
-The stable intent codes are `canonical_differs`, `canonical_offsite`, `canonical_unreadable`, `noindex`, `meta_refresh`, `fragment_missing`, `fragment_inconclusive`, `page_nofollow`, `internal_nofollow`, and `file_response`. Exports use those codes, and the human-readable wording is translated with the rest of the interface.
+The stable intent codes are `canonical_differs`, `canonical_offsite`, `canonical_unreadable`, `noindex`, `meta_refresh`, `fragment_missing`, `fragment_inconclusive`, `page_nofollow`, `internal_nofollow`, `file_response`, `scheme_mismatch`, and `permalink_mismatch`. A link scheme mismatch or a trailing-slash difference is only reported on a healthy, directly served response, and both offer a suggested replacement. Exports use those codes, and the human-readable wording is translated with the rest of the interface.
 
 ## Content link coverage
 
@@ -264,7 +271,7 @@ This is a stored-source link checker, not a rendered-site crawler. It does not e
 
 HTTP checks use bounded GET response bodies, administrator-selected timeouts and redirect limits, WordPress unsafe-URL rejection, and manual same-site redirect handling.
 
-Destination intent is judged from the fetched same-site response only. The plugin reads the response header, the head of the document, and up to 256 KB of the body, retains no response bodies, and keeps only derived evidence. A response that reaches that bound is treated as partial: fragment findings are then reported as inconclusive rather than missing, and up to 100 fragment targets are stored per page. Fragment-only links within their source page remain outside the scan. Page intent is inspected only on final successful same-site responses, including those reached after redirects. Transport outcomes remain dominant; no canonical target is fetched, and no soft-404, title, heading, schema, or score heuristic is applied.
+Destination intent is judged from the fetched same-site response only. Two address checks are derived without an extra request: a stored link whose scheme differs from the site address, and a stored link whose trailing slash differs from the permalink that WordPress routing reports for the content it resolves to. Both are only reported on a healthy, directly served response. The plugin reads the response header, the head of the document, and up to 256 KB of the body, retains no response bodies, and keeps only derived evidence. A response that reaches that bound is treated as partial: fragment findings are then reported as inconclusive rather than missing, and up to 100 fragment targets are stored per page. Fragment-only links within their source page remain outside the scan. Page intent is inspected only on final successful same-site responses, including those reached after redirects. Transport outcomes remain dominant; no canonical target is fetched, and no soft-404, title, heading, schema, or score heuristic is applied.
 
 One scan can snapshot at most 100,000 stored sources. Saved-scan uploads are limited to 20 MB, 100,000 content items, and 100,000 link-result rows. Uploaded data must use an exact supported format and belong to the current normalized site URL.
 
@@ -355,7 +362,7 @@ WP_CLI_BIN=/path/to/wp ./scripts/check-i18n.sh /tmp/indexlane-redirect-internal-
 
 The translation check audits literal gettext calls and translator comments, then generates and validates a local POT without bundling translations. The CI workflow also installs WordPress, activates the plugin, runs the WordPress-loaded adapter/integration suite, and exercises the authenticated AJAX lifecycle, saved-scan save/upload/download/delete flow, exact-scope fix checks, comparison downloads, coverage filters, and detail views over HTTP.
 
-[Publishing commands for 1.0.0](docs/publishing-1.0.0.md) cover Git, GitHub releases, and the existing WordPress.org SVN checkout. [Release notes for 1.0.0](docs/releases/1.0.0.md) describe what changed in this version.
+[Publishing commands for 1.1.0](docs/publishing-1.1.0.md) cover Git, GitHub releases, and the existing WordPress.org SVN checkout. [Release notes for 1.1.0](docs/releases/1.1.0.md) describe what changed in this version.
 
 Build the production ZIP for WordPress.org submission:
 

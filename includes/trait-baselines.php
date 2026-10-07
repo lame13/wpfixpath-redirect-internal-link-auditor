@@ -800,6 +800,8 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 				'page_nofollow',
 				'internal_nofollow',
 				'file_response',
+				'scheme_mismatch',
+				'permalink_mismatch',
 			),
 			true
 		);
@@ -814,7 +816,7 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Baselines {
 		if ( '' === $code ) {
 			return '';
 		}
-		if ( in_array( $code, array( 'canonical_differs', 'canonical_offsite', 'noindex' ), true ) ) {
+		if ( in_array( $code, array( 'canonical_differs', 'canonical_offsite', 'noindex', 'scheme_mismatch', 'permalink_mismatch' ), true ) ) {
 			return 'needs_review';
 		}
 		return in_array( $code, array( 'meta_refresh', 'fragment_missing' ), true ) ? 'warning' : 'info';

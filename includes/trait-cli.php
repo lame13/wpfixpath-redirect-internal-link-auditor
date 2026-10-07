@@ -216,6 +216,64 @@ trait IndexLane_Redirect_Internal_Link_Auditor_CLI {
 	}
 
 	/**
+	 * Preview or apply every suggested replacement from one complete scan.
+	 *
+	 * @param bool                $dry_run          Whether to skip writing.
+	 * @param array<string,mixed> $assoc_args       Associative CLI arguments.
+	 * @param array<int,string>|null $include_from_url Stored URLs to include, or null for every suggestion.
+	 * @return array<string,mixed>|WP_Error
+	 */
+	public static function cli_fix_suggested( bool $dry_run, array $assoc_args, ?array $include_from_url = null ) {
+		$settings = self::cli_scan_settings( $assoc_args );
+		if ( is_wp_error( $settings ) ) {
+			return $settings;
+		}
+
+		$request_limit = isset( $assoc_args['request-limit'] ) ? absint( $assoc_args['request-limit'] ) : self::MONITOR_DEFAULT_REQUEST_LIMIT;
+		$session       = self::cli_run_scan( $settings, $request_limit );
+		if ( is_wp_error( $session ) ) {
+			return $session;
+		}
+
+		if ( 'complete' !== $session['status'] ) {
+			return new WP_Error( 'cli_partial_scan', __( 'The scan is incomplete. Increase the request limit or narrow the scope before repairing links.', 'indexlane-redirect-internal-link-auditor' ) );
+		}
+
+		$plan = self::build_fix_all_plan( $session, $include_from_url );
+		if ( is_wp_error( $plan ) ) {
+			return $plan;
+		}
+
+		$summary = array(
+			'urls'        => count( $plan['pairs'] ),
+			'sources'     => (int) $plan['sources'],
+			'occurrences' => (int) $plan['occurrences'],
+			'pairs'       => (array) $plan['pairs'],
+			'skipped'     => (array) $plan['skipped'],
+			'applied'     => false,
+			'batch_id'    => '',
+			'dry_run'     => $dry_run,
+		);
+
+		if ( $dry_run ) {
+			return $summary;
+		}
+
+		$result = self::apply_fix_all_plan( $plan );
+		if ( is_wp_error( $result ) ) {
+			return $result;
+		}
+
+		$summary['applied']     = true;
+		$summary['batch_id']    = (string) $result['batch_id'];
+		$summary['sources']     = (int) $result['sources'];
+		$summary['occurrences'] = (int) $result['occurrences'];
+		$summary['skipped']     = array_merge( $summary['skipped'], (array) $result['skipped'] );
+
+		return $summary;
+	}
+
+	/**
 	 * Undo one recorded repair batch.
 	 *
 	 * @param string $batch_id Journal batch ID.
@@ -253,11 +311,23 @@ trait IndexLane_Redirect_Internal_Link_Auditor_CLI {
 		$rows = array();
 
 		foreach ( self::get_fix_journal()['batches'] as $batch ) {
+			$pairs = isset( $batch['pairs'] ) && is_array( $batch['pairs'] ) ? $batch['pairs'] : array();
+			$from  = (string) $batch['from_url'];
+			$to    = (string) $batch['to_url'];
+			if ( ! empty( $pairs ) ) {
+				$from = sprintf(
+					/* translators: %d: number of stored URLs repaired together */
+					_n( '%d suggested fix', '%d suggested fixes', count( $pairs ), 'indexlane-redirect-internal-link-auditor' ),
+					count( $pairs )
+				);
+				$to = '';
+			}
+
 			$rows[] = array(
 				'batch_id'   => (string) $batch['batch_id'],
 				'created'    => gmdate( 'c', (int) $batch['created_at'] ),
-				'from'       => (string) $batch['from_url'],
-				'to'         => (string) $batch['to_url'],
+				'from'       => $from,
+				'to'         => $to,
 				'sources'    => count( (array) $batch['items'] ),
 				'status'     => isset( $batch['status'] ) ? (string) $batch['status'] : 'applied',
 			);

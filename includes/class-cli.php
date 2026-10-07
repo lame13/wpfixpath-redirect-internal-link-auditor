@@ -209,6 +209,125 @@ if ( ! class_exists( 'IndexLane_RILA_CLI' ) ) {
 		}
 
 		/**
+		 * Replace every stored link that has a suggested replacement.
+		 *
+		 * Each suggested URL was derived from the redirect target or the
+		 * published content it resolves to. The batch is written as one
+		 * change that can be undone with a single command.
+		 *
+		 * ## OPTIONS
+		 *
+		 * [--dry-run]
+		 * : Preview the exact changes without writing anything.
+		 *
+		 * [--yes]
+		 * : Apply without an interactive confirmation.
+		 *
+		 * [--from=<urls>]
+		 * : Comma-separated stored URLs to limit the batch to. Defaults to every suggestion.
+		 *
+		 * [--source-types=<types>]
+		 * : Comma-separated source providers. Defaults to every available provider.
+		 *
+		 * [--post-types=<types>]
+		 * : Comma-separated public post types. Defaults to every public post type.
+		 *
+		 * [--content-scope=<scope>]
+		 * : `all` or `limit`. Defaults to `all`.
+		 *
+		 * [--max-posts=<number>]
+		 * : Number of newest content items when the scope is `limit`.
+		 *
+		 * [--old-domains=<domains>]
+		 * : Comma-separated previous site domains to flag without contacting them.
+		 *
+		 * [--timeout=<seconds>]
+		 * : Timeout for each HTTP request. Defaults to 5 seconds.
+		 *
+		 * [--max-redirects=<number>]
+		 * : Maximum redirect hops. Defaults to 5.
+		 *
+		 * [--request-limit=<number>]
+		 * : Maximum outbound requests. Defaults to 2000.
+		 *
+		 * [--format=<format>]
+		 * : `table`, `json`, or `csv`. Defaults to `table`.
+		 *
+		 * ## EXAMPLES
+		 *
+		 *     wp indexlane fix-suggested --dry-run
+		 *     wp indexlane fix-suggested --yes
+		 *
+		 * @param array<int,string>   $args       Positional arguments.
+		 * @param array<string,mixed> $assoc_args Associative arguments.
+		 */
+		public function fix_suggested( $args, $assoc_args ): void {
+			unset( $args );
+
+			$dry_run = isset( $assoc_args['dry-run'] );
+			if ( ! $dry_run ) {
+				WP_CLI::confirm( __( 'Replace every suggested link in the current site content?', 'indexlane-redirect-internal-link-auditor' ), $assoc_args );
+			}
+
+			$include = null;
+			if ( isset( $assoc_args['from'] ) ) {
+				$include = array_values( array_filter( array_map( 'trim', explode( ',', (string) $assoc_args['from'] ) ) ) );
+			}
+
+			$result = IndexLane_Redirect_Internal_Link_Auditor::cli_fix_suggested( $dry_run, $assoc_args, $include );
+			if ( is_wp_error( $result ) ) {
+				$this->fail( $result );
+			}
+
+			$rows = array();
+			foreach ( $result['pairs'] as $pair ) {
+				$rows[] = array(
+					'from' => (string) $pair['from_url'],
+					'to'   => (string) $pair['to_url'],
+				);
+			}
+
+			if ( 'table' === $this->format( $assoc_args ) && empty( $rows ) ) {
+				WP_CLI::warning( __( 'No suggested replacements were found.', 'indexlane-redirect-internal-link-auditor' ) );
+				return;
+			}
+
+			WP_CLI\Utils\format_items( $this->format( $assoc_args ), $rows, array( 'from', 'to' ) );
+
+			if ( ! empty( $result['skipped'] ) ) {
+				WP_CLI::log( __( 'Suggestions left untouched:', 'indexlane-redirect-internal-link-auditor' ) );
+				foreach ( $result['skipped'] as $skipped ) {
+					$label = isset( $skipped['source_title'] ) && '' !== (string) $skipped['source_title'] ? (string) $skipped['source_title'] : (string) ( $skipped['from_url'] ?? '' );
+					WP_CLI::log( '  - ' . $label . ': ' . (string) $skipped['reason'] );
+				}
+			}
+
+			if ( $dry_run ) {
+				WP_CLI::success(
+					sprintf(
+						/* translators: 1: number of link occurrences, 2: number of stored sources, 3: number of stored URLs */
+						__( 'Preview only: %1$d link occurrences in %2$d sources across %3$d URLs would change.', 'indexlane-redirect-internal-link-auditor' ),
+						(int) $result['occurrences'],
+						(int) $result['sources'],
+						(int) $result['urls']
+					)
+				);
+				return;
+			}
+
+			WP_CLI::success(
+				sprintf(
+					/* translators: 1: number of link occurrences, 2: number of stored sources, 3: number of stored URLs, 4: repair batch ID */
+					__( 'Replaced %1$d link occurrences in %2$d sources across %3$d URLs. Undo with: wp indexlane undo --batch=%4$s', 'indexlane-redirect-internal-link-auditor' ),
+					(int) $result['occurrences'],
+					(int) $result['sources'],
+					(int) $result['urls'],
+					(string) $result['batch_id']
+				)
+			);
+		}
+
+		/**
 		 * Undo a recorded link repair.
 		 *
 		 * ## OPTIONS

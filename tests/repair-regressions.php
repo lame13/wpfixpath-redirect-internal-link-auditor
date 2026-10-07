@@ -111,3 +111,116 @@ $fragment_row = indexlane_invoke( 'build_result_row', array(
 indexlane_assert_same( 'https://old.example/old/#details', $fragment_row['linked_url'], 'Migration findings must preserve fragments so they can be repaired exactly.' );
 $fragment_redirect = array_merge( $redirect_row, array( 'linked_url' => 'https://example.test/old-service/#details' ) );
 indexlane_assert_same( 'https://example.test/services/#details', indexlane_invoke( 'suggested_replacement_for_row', array( $fragment_redirect ) ), 'A redirect suggestion must not silently discard the linked section.' );
+
+// 1.1.0: one reviewed batch plan that repairs every suggested URL.
+$post_backup = $_POST;
+$_POST       = array();
+indexlane_assert_same( null, indexlane_invoke( 'requested_fix_selection' ), 'A first review without a selection field must mean every suggestion.' );
+$_POST = array( 'include_present' => '1' );
+indexlane_assert_same( array(), indexlane_invoke( 'requested_fix_selection' ), 'Clearing every suggestion must post an explicit empty selection.' );
+$_POST = array(
+	'include_present' => '1',
+	'include'         => array( 'https://example.test/old-a/', 'https://example.test/old-a/', 'not a url' ),
+);
+indexlane_assert_same( array( 'https://example.test/old-a/' ), indexlane_invoke( 'requested_fix_selection' ), 'A review selection must keep unique, valid stored URLs.' );
+$_POST = $post_backup;
+
+$GLOBALS['indexlane_test_options']['indexlane_rila_fix_journal'] = array( 'batches' => array() );
+$GLOBALS['indexlane_test_posts'][921] = (object) array(
+	'ID'           => 921,
+	'post_type'    => 'page',
+	'post_status'  => 'publish',
+	'post_content' => '<a href="/old-a/">A</a><a href="/old-b/">B</a>',
+);
+$GLOBALS['indexlane_test_posts'][922] = (object) array(
+	'ID'           => 922,
+	'post_type'    => 'page',
+	'post_status'  => 'publish',
+	'post_content' => '<p><a href="/old-a/">A</a></p>',
+);
+
+$batch_row_a = array(
+	'source_id'        => 921,
+	'source_key'       => 'content:page:921',
+	'source_content_id' => 921,
+	'source_title'     => 'Page A',
+	'source_type'      => 'Page',
+	'source_type_code' => 'content',
+	'source_context'   => 'contextual',
+	'source_url'       => 'https://example.test/page-a/',
+	'source_edit_url'  => '',
+	'linked_url'       => 'https://example.test/old-a/',
+	'http_status'      => '301 -> 200',
+	'redirect_count'   => 1,
+	'final_url'        => 'https://example.test/new-a/',
+	'result'           => 'Warning',
+	'result_code'      => 'warning',
+	'intent_code'      => '',
+);
+$batch_row_b = array_merge(
+	$batch_row_a,
+	array(
+		'linked_url' => 'https://example.test/old-b/',
+		'final_url'  => 'https://example.test/new-b/',
+	)
+);
+$batch_row_a2 = array_merge( $batch_row_a, array( 'source_id' => 922, 'source_key' => 'content:page:922', 'source_content_id' => 922, 'source_title' => 'Page B' ) );
+
+$batch_scan    = array( 'status' => 'complete', 'results' => array( $batch_row_a, $batch_row_b, $batch_row_a2 ) );
+$batch_all     = indexlane_invoke( 'build_fix_all_plan', array( $batch_scan ) );
+indexlane_assert_same( false, is_wp_error( $batch_all ), 'Every suggested URL must produce one batch plan.' );
+indexlane_assert_same( 2, count( $batch_all['pairs'] ), 'The batch must list one pair per suggested URL.' );
+indexlane_assert_same( 2, $batch_all['sources'], 'A source with two suggested URLs must be folded into one write.' );
+indexlane_assert_same( 3, $batch_all['occurrences'], 'The batch must count every exact replacement once.' );
+indexlane_assert_same(
+	'<a href="/new-a/">A</a><a href="/new-b/">B</a>',
+	$batch_all['items'][0]['after'],
+	'A source must apply every suggested replacement in one merged value.'
+);
+
+ob_start();
+indexlane_invoke( 'render_fix_all_preview', array( $batch_all ) );
+$batch_preview_html = (string) ob_get_clean();
+indexlane_assert_same( 2, substr_count( $batch_preview_html, 'name="include[]"' ), 'The batch preview must offer one include checkbox per suggested URL.' );
+indexlane_assert_same( true, false !== strpos( $batch_preview_html, 'value="fix_apply_all"' ), 'The batch preview must apply through the batch action.' );
+indexlane_assert_same( true, false !== strpos( $batch_preview_html, 'name="fix_confirmation"' ), 'The batch preview must carry an exact-plan confirmation.' );
+
+$batch_confirmation = indexlane_invoke( 'fix_confirmation_action', array( $batch_all ) );
+$batch_changed      = $batch_all;
+$batch_changed['items'][0]['before'] .= 'manual edit';
+indexlane_assert_same( false, $batch_confirmation === indexlane_invoke( 'fix_confirmation_action', array( $batch_changed ) ), 'A source changed after the batch preview must invalidate its confirmation.' );
+$batch_changed = $batch_all;
+$batch_changed['pairs'][0]['to_url'] = 'https://example.test/other/';
+indexlane_assert_same( false, $batch_confirmation === indexlane_invoke( 'fix_confirmation_action', array( $batch_changed ) ), 'A changed suggestion must invalidate the batch confirmation.' );
+
+$batch_subset = indexlane_invoke( 'build_fix_all_plan', array( $batch_scan, array( 'https://example.test/old-b/' ) ) );
+indexlane_assert_same( 1, count( $batch_subset['pairs'] ), 'Selecting one suggested URL must build a single-URL batch.' );
+indexlane_assert_same( 1, $batch_subset['occurrences'], 'A single-URL batch must count only the selected suggestion.' );
+
+$empty_selection = indexlane_invoke( 'build_fix_all_plan', array( $batch_scan, array() ) );
+indexlane_assert_same( 'fix_all_none_selected', $empty_selection->get_error_code(), 'Clearing every suggestion must fail with a clear message.' );
+
+$batch_applied = indexlane_invoke( 'apply_fix_all_plan', array( $batch_all ) );
+indexlane_assert_same( false, is_wp_error( $batch_applied ), 'A confirmed batch must apply in one pass.' );
+indexlane_assert_same( 2, $batch_applied['sources'], 'The batch must report the number of changed sources.' );
+indexlane_assert_same( 3, $batch_applied['occurrences'], 'The batch must report every exact replacement.' );
+indexlane_assert_same(
+	'<a href="/new-a/">A</a><a href="/new-b/">B</a>',
+	$GLOBALS['indexlane_test_posts'][921]->post_content,
+	'Applying the batch must update a source with multiple suggestions.'
+);
+indexlane_assert_same( '<p><a href="/new-a/">A</a></p>', $GLOBALS['indexlane_test_posts'][922]->post_content, 'Applying the batch must update every affected source.' );
+
+$batch_journal = indexlane_invoke( 'get_fix_journal' );
+indexlane_assert_same( 2, count( $batch_journal['batches'][0]['pairs'] ), 'The undo history must retain every repaired URL in one batch.' );
+indexlane_assert_same( 'suggested', $batch_journal['batches'][0]['kind'], 'A suggested-fix batch must be recorded as one undoable entry.' );
+
+$cli_batch_repairs = indexlane_invoke( 'cli_repairs' );
+indexlane_assert_same( true, false !== strpos( $cli_batch_repairs[0]['from'], 'suggested fix' ), 'The command-line repair list must label a suggested-fix batch.' );
+
+$batch_undo = indexlane_invoke( 'undo_fix_batch', array( $batch_applied['batch_id'] ) );
+indexlane_assert_same( 2, $batch_undo['restored'], 'One undo must restore every source in the batch.' );
+indexlane_assert_same( '<a href="/old-a/">A</a><a href="/old-b/">B</a>', $GLOBALS['indexlane_test_posts'][921]->post_content, 'Undo must restore a source with multiple suggestions.' );
+indexlane_assert_same( '<p><a href="/old-a/">A</a></p>', $GLOBALS['indexlane_test_posts'][922]->post_content, 'Undo must restore every source in the batch.' );
+
+unset( $GLOBALS['indexlane_test_posts'][921], $GLOBALS['indexlane_test_posts'][922] );

@@ -34,6 +34,8 @@ $GLOBALS['indexlane_test_options'] = array(
 	'blogname'    => 'Example Site',
 );
 $GLOBALS['indexlane_test_posts']            = array();
+$GLOBALS['indexlane_test_url_post_ids']     = array();
+$GLOBALS['indexlane_test_permalinks']       = array();
 $GLOBALS['indexlane_test_post_writes']      = array();
 $GLOBALS['indexlane_test_revisions']        = array();
 $GLOBALS['indexlane_test_post_meta']        = array();
@@ -159,6 +161,8 @@ function get_post_types( array $args = array(), string $output = 'names' ): arra
 		$object->labels                = new stdClass();
 		$object->labels->name          = $label;
 		$object->labels->singular_name = rtrim( $label, 's' );
+		$object->public                = true;
+		$object->publicly_queryable    = true;
 		$objects[ $name ]              = $object;
 	}
 
@@ -322,6 +326,17 @@ function delete_option( string $option ): bool {
 function get_post( $post_id ) {
 	$post_id = (int) $post_id;
 	return isset( $GLOBALS['indexlane_test_posts'][ $post_id ] ) ? $GLOBALS['indexlane_test_posts'][ $post_id ] : null;
+}
+function url_to_postid( string $url ): int {
+	$key = (string) preg_replace( '/#.*/', '', $url );
+	$key = rtrim( $key, '/' );
+
+	return isset( $GLOBALS['indexlane_test_url_post_ids'][ $key ] ) ? (int) $GLOBALS['indexlane_test_url_post_ids'][ $key ] : 0;
+}
+function get_permalink( $post ) {
+	$post_id = is_object( $post ) && isset( $post->ID ) ? (int) $post->ID : (int) $post;
+
+	return isset( $GLOBALS['indexlane_test_permalinks'][ $post_id ] ) ? $GLOBALS['indexlane_test_permalinks'][ $post_id ] : false;
 }
 function wp_update_post( array $postarr, bool $wp_error = false ) {
 	$post_id = isset( $postarr['ID'] ) ? (int) $postarr['ID'] : 0;
@@ -1607,9 +1622,11 @@ $intent_source = array(
  * @param string              $rel        Stored rel attribute.
  */
 function indexlane_intent_occurrence( array $source, string $linked_url, string $fragment = '', string $rel = '' ): array {
+	$href = '' !== $fragment ? $linked_url . '#' . $fragment : $linked_url;
+
 	return array(
 		'source'     => $source,
-		'link'       => array( 'href' => $linked_url, 'anchor' => 'Service', 'rel' => $rel ),
+		'link'       => array( 'href' => $href, 'anchor' => 'Service', 'rel' => $rel ),
 		'linked_url' => $linked_url,
 		'warnings'   => array(),
 		'is_old'     => false,
@@ -1808,6 +1825,53 @@ indexlane_assert_same( 'needs_review', indexlane_invoke( 'merge_intent_result_co
 indexlane_assert_same( 'warning', indexlane_invoke( 'merge_intent_result_code', array( 'ok', 'warning' ) ), 'A page warning must escalate a healthy response.' );
 indexlane_assert_same( 'warning', indexlane_invoke( 'merge_intent_result_code', array( 'warning', 'info' ) ), 'Informational intent must not change a transport warning.' );
 indexlane_assert_same( 'ok', indexlane_invoke( 'merge_intent_result_code', array( 'ok', 'info' ) ), 'Informational intent alone must stay OK.' );
+
+// 1.1.0: address intent that compares a stored link with where it is served.
+$GLOBALS['indexlane_test_url_post_ids'] = array( 'https://example.test/about' => 611 );
+$GLOBALS['indexlane_test_permalinks']   = array( 611 => 'https://example.test/about/' );
+$GLOBALS['indexlane_test_posts'][611]   = (object) array(
+	'ID'           => 611,
+	'post_type'    => 'page',
+	'post_status'  => 'publish',
+	'post_content' => '',
+);
+$GLOBALS['indexlane_test_responses'] = array(
+	'https://example.test/about' => indexlane_html_response( '<html><body><h2 id="intro">About</h2></body></html>' ),
+	'http://example.test/about'  => indexlane_html_response( '<html><body><h2 id="intro">About</h2></body></html>' ),
+);
+
+$about_requests = 0;
+$about_check    = indexlane_invoke( 'check_url', array( 'https://example.test/about', 2.0, 5, &$about_requests ) );
+$about_row      = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/about' ), $about_check ) );
+indexlane_assert_same( 'permalink_mismatch', $about_row['intent_code'], 'A stored link whose trailing slash differs from its permalink must be reported.' );
+indexlane_assert_same( 'needs_review', $about_row['result_code'], 'A permalink mismatch on a healthy response must need review.' );
+indexlane_assert_same( 'https://example.test/about/', indexlane_invoke( 'suggested_replacement_for_row', array( $about_row ) ), 'A permalink mismatch must suggest the address WordPress serves.' );
+indexlane_assert_same( 'needs_review', indexlane_invoke( 'intent_severity_for_code', array( 'permalink_mismatch' ) ), 'A permalink mismatch must round-trip through saved-scan validation.' );
+
+$about_fragment_check = $about_check;
+$about_fragment_row   = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/about', 'intro' ), $about_fragment_check ) );
+indexlane_assert_same( 'https://example.test/about/#intro', indexlane_invoke( 'suggested_replacement_for_row', array( $about_fragment_row ) ), 'A permalink suggestion must keep the linked section so a repair never drops it.' );
+
+$split_requests = 0;
+$http_check     = indexlane_invoke( 'check_url', array( 'http://example.test/about', 2.0, 5, &$split_requests ) );
+$http_row       = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'http://example.test/about' ), $http_check ) );
+indexlane_assert_same( 'scheme_mismatch', $http_row['intent_code'], 'A link that uses http on an https site must be reported.' );
+indexlane_assert_same( 'needs_review', $http_row['result_code'], 'A scheme mismatch on a healthy response must need review.' );
+indexlane_assert_same( 'https://example.test/about', indexlane_invoke( 'suggested_replacement_for_row', array( $http_row ) ), 'A scheme mismatch must suggest the same address on the site scheme.' );
+indexlane_assert_same( 'needs_review', indexlane_invoke( 'intent_severity_for_code', array( 'scheme_mismatch' ) ), 'A scheme mismatch must round-trip through saved-scan validation.' );
+
+$redirect_scheme_check = $http_check;
+$redirect_scheme_check['redirect_count'] = 1;
+$redirect_scheme_row   = indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'http://example.test/about' ), $redirect_scheme_check ) );
+indexlane_assert_same( 'warning', $redirect_scheme_row['result_code'], 'A redirected link must keep its transport outcome instead of a scheme finding.' );
+indexlane_assert_same( '', $redirect_scheme_row['intent_code'], 'Address intent must not fire when the link already redirects.' );
+
+indexlane_assert_same( true, indexlane_invoke( 'is_supported_intent_code', array( 'scheme_mismatch' ) ), 'The new address intent codes must belong to the supported evidence set.' );
+indexlane_assert_same( true, indexlane_invoke( 'is_supported_intent_code', array( 'permalink_mismatch' ) ), 'The new address intent codes must belong to the supported evidence set.' );
+
+$GLOBALS['indexlane_test_url_post_ids'] = array();
+$GLOBALS['indexlane_test_permalinks']    = array();
+unset( $GLOBALS['indexlane_test_posts'][611] );
 
 $http_calls_before_intent_rows = count( $GLOBALS['indexlane_test_http_calls'] );
 indexlane_invoke( 'build_checked_result_row', array( indexlane_intent_occurrence( $intent_source, 'https://example.test/old-service', 'intro' ), $moved_check ) );

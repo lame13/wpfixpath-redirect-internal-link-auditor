@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.1.0 - 2026-10-07
+
+You can now apply grouped fixes, and the scan catches two more links that respond but still point somewhere wrong.
+
+- **Fix the suggested links in one reviewed batch.** Every URL with a suggested replacement can be reviewed together, left out individually, and applied as one change. A source that contains several of the suggested URLs is written once, and a single Undo restores the whole batch.
+- Added **Page intent** checks for a stored link that uses a different scheme than the site address and for a link whose trailing slash differs from the address WordPress serves for it. Both offer a suggested replacement.
+- Kept the repair rules unchanged: only complete link attributes and supported block link settings change, the exact before-and-after values stay in the preview, and a source edited after the preview is skipped.
+- Added `wp indexlane fix-suggested` so the same reviewed batch can be previewed with `--dry-run` or applied from a script.
+
 ## 1.0.0 - 2026-09-26
 
 You can now fix links from the results page and schedule checks to catch new problems. Scanning still leaves your content unchanged; repairs need your confirmation.

@@ -11,6 +11,16 @@ if ( ! defined( 'ABSPATH' ) ) {
 
 trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 	/**
+	 * Request-scoped cache for same-site URL destinations.
+	 *
+	 * The permalink-intent check resolves a stored link to published content,
+	 * and many occurrences can share the same URL within one scan batch.
+	 *
+	 * @var array<string,int>
+	 */
+	private static $resolved_destination_ids = array();
+
+	/**
 	 * Default scan settings.
 	 *
 	 * @return array<string,mixed>
@@ -926,26 +936,33 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 			return 0;
 		}
 
+		$cache_key = self::normalize_url_for_compare( $url );
+		if ( '' !== $cache_key && array_key_exists( $cache_key, self::$resolved_destination_ids ) ) {
+			return (int) self::$resolved_destination_ids[ $cache_key ];
+		}
+
 		$post_id = (int) url_to_postid( $url );
-		if ( $post_id <= 0 || ! function_exists( 'get_post' ) ) {
-			return 0;
+		$resolved = 0;
+
+		if ( $post_id > 0 && function_exists( 'get_post' ) ) {
+			$post = get_post( $post_id );
+			if ( $post && 'publish' === $post->post_status ) {
+				$post_type_object = get_post_type_object( (string) $post->post_type );
+				if ( $post_type_object ) {
+					$is_viewable = function_exists( 'is_post_type_viewable' )
+						? is_post_type_viewable( $post_type_object )
+						: ! empty( $post_type_object->publicly_queryable ) || ! empty( $post_type_object->public );
+
+					$resolved = $is_viewable ? $post_id : 0;
+				}
+			}
 		}
 
-		$post = get_post( $post_id );
-		if ( ! $post || 'publish' !== $post->post_status ) {
-			return 0;
+		if ( '' !== $cache_key ) {
+			self::$resolved_destination_ids[ $cache_key ] = $resolved;
 		}
 
-		$post_type_object = get_post_type_object( (string) $post->post_type );
-		if ( ! $post_type_object ) {
-			return 0;
-		}
-
-		$is_viewable = function_exists( 'is_post_type_viewable' )
-			? is_post_type_viewable( $post_type_object )
-			: ! empty( $post_type_object->publicly_queryable ) || ! empty( $post_type_object->public );
-
-		return $is_viewable ? $post_id : 0;
+		return $resolved;
 	}
 
 	/**
@@ -1882,6 +1899,10 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 
 		$findings = self::page_intent_findings( $intent );
 
+		foreach ( self::link_address_intent_findings( $occurrence, $check ) as $address_finding ) {
+			$findings[] = $address_finding;
+		}
+
 		$fragment = isset( $occurrence['fragment'] ) ? (string) $occurrence['fragment'] : '';
 		if ( isset( $check['redirect_fragment'] ) ) {
 			$fragment = (string) $check['redirect_fragment'];
@@ -1899,6 +1920,151 @@ trait IndexLane_Redirect_Internal_Link_Auditor_Scan {
 		}
 
 		return self::summarize_intent_findings( $findings );
+	}
+
+	/**
+	 * Derive intent findings that compare a stored link with where it is served.
+	 *
+	 * These checks only upgrade a healthy, directly served response. A link
+	 * that already redirects, is blocked, or is broken keeps the outcome its
+	 * transport evidence produced, and this address evidence is reported beside
+	 * that result.
+	 *
+	 * @param array<string,mixed> $occurrence Prepared occurrence.
+	 * @param array<string,mixed> $check      Completed URL check.
+	 * @return array<int,array{code:string,severity:string,detail:string}>
+	 */
+	private static function link_address_intent_findings( array $occurrence, array $check ): array {
+		$findings = array();
+
+		if ( empty( $check['ok'] ) || 0 !== (int) ( $check['redirect_count'] ?? 0 ) ) {
+			return $findings;
+		}
+
+		$final_status = isset( $check['final_status'] ) ? (int) $check['final_status'] : 0;
+		if ( $final_status < 200 || $final_status > 299 ) {
+			return $findings;
+		}
+
+		$linked_url = isset( $occurrence['linked_url'] ) ? trim( (string) $occurrence['linked_url'] ) : '';
+		if ( '' === $linked_url || ! self::is_same_site_url( $linked_url ) ) {
+			return $findings;
+		}
+
+		$scheme_finding = self::scheme_intent_finding( $linked_url );
+		if ( '' !== $scheme_finding['code'] ) {
+			$findings[] = $scheme_finding;
+		}
+
+		$permalink_finding = self::permalink_intent_finding( $linked_url );
+		if ( '' !== $permalink_finding['code'] ) {
+			$findings[] = $permalink_finding;
+		}
+
+		return $findings;
+	}
+
+	/**
+	 * Report a stored link that uses a different scheme than the site address.
+	 *
+	 * @param string $linked_url Same-site linked URL.
+	 * @return array{code:string,severity:string,detail:string}
+	 */
+	private static function scheme_intent_finding( string $linked_url ): array {
+		$link_scheme = strtolower( (string) wp_parse_url( $linked_url, PHP_URL_SCHEME ) );
+		$site_scheme = strtolower( (string) wp_parse_url( home_url( '/' ), PHP_URL_SCHEME ) );
+
+		if ( '' === $link_scheme || '' === $site_scheme || $link_scheme === $site_scheme ) {
+			return self::empty_intent_summary();
+		}
+
+		return array(
+			'code'     => 'scheme_mismatch',
+			'severity' => 'needs_review',
+			'detail'   => sprintf(
+				/* translators: 1: URL scheme used by the stored link, 2: URL scheme used by the site address */
+				__( 'This link uses %1$s:// while the site address uses %2$s://.', 'indexlane-redirect-internal-link-auditor' ),
+				$link_scheme,
+				$site_scheme
+			),
+		);
+	}
+
+	/**
+	 * Report a stored link whose trailing slash differs from its permalink.
+	 *
+	 * A link that resolves to published content but is not stored with the
+	 * exact address WordPress serves for that content is worth reviewing, even
+	 * when the response succeeds. Only a pure trailing-slash difference is
+	 * reported, so query strings and other address changes are left alone.
+	 *
+	 * @param string $linked_url Same-site linked URL.
+	 * @return array{code:string,severity:string,detail:string}
+	 */
+	private static function permalink_intent_finding( string $linked_url ): array {
+		if ( ! function_exists( 'url_to_postid' ) || ! function_exists( 'get_permalink' ) ) {
+			return self::empty_intent_summary();
+		}
+
+		$target_id = self::published_content_id_for_url( $linked_url );
+		if ( $target_id <= 0 ) {
+			return self::empty_intent_summary();
+		}
+
+		$permalink = get_permalink( $target_id );
+		if ( ! is_string( $permalink ) || '' === trim( $permalink ) ) {
+			return self::empty_intent_summary();
+		}
+
+		$stored    = self::normalize_url_for_compare( $linked_url );
+		$canonical = self::normalize_url_for_compare( $permalink );
+		if ( '' === $stored || '' === $canonical || $stored === $canonical ) {
+			return self::empty_intent_summary();
+		}
+
+		if ( ! self::urls_differ_only_by_trailing_slash( $stored, $canonical ) ) {
+			return self::empty_intent_summary();
+		}
+
+		return array(
+			'code'     => 'permalink_mismatch',
+			'severity' => 'needs_review',
+			'detail'   => sprintf(
+				/* translators: %s: address WordPress serves for the linked content */
+				__( 'This link uses a different trailing slash than the address WordPress serves for it: %s', 'indexlane-redirect-internal-link-auditor' ),
+				self::truncate_text( $permalink, 500 )
+			),
+		);
+	}
+
+	/**
+	 * Whether two normalized URLs differ only in their trailing slash.
+	 *
+	 * @param string $left  Normalized URL.
+	 * @param string $right Normalized URL.
+	 */
+	private static function urls_differ_only_by_trailing_slash( string $left, string $right ): bool {
+		$left_parts  = wp_parse_url( $left );
+		$right_parts = wp_parse_url( $right );
+		if ( ! is_array( $left_parts ) || ! is_array( $right_parts ) ) {
+			return false;
+		}
+
+		foreach ( array( 'scheme', 'host', 'port', 'query' ) as $component ) {
+			$left_value  = isset( $left_parts[ $component ] ) ? strtolower( (string) $left_parts[ $component ] ) : '';
+			$right_value = isset( $right_parts[ $component ] ) ? strtolower( (string) $right_parts[ $component ] ) : '';
+			if ( $left_value !== $right_value ) {
+				return false;
+			}
+		}
+
+		$left_path  = isset( $left_parts['path'] ) && '' !== $left_parts['path'] ? (string) $left_parts['path'] : '/';
+		$right_path = isset( $right_parts['path'] ) && '' !== $right_parts['path'] ? (string) $right_parts['path'] : '/';
+		if ( $left_path === $right_path ) {
+			return false;
+		}
+
+		return rtrim( $left_path, '/' ) === rtrim( $right_path, '/' );
 	}
 
 	/**
